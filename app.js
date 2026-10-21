@@ -56,7 +56,8 @@ const elements = {
     themeToggle: $('themeToggle'),
     statLatency: $('statLatency'),
     statChunks: $('statChunks'),
-    statDuration: $('statDuration')
+    statDuration: $('statDuration'),
+    clearInputBtn: $('clearInputBtn')
 };
 
 /* ==========================================================================
@@ -1261,6 +1262,12 @@ function initVisualizer() {
    ========================================================================== */
 elements.clearLogs.onclick = () => {
     elements.logs.textContent = '[Logs cleared]\n';
+};
+
+elements.clearInputBtn.onclick = () => {
+    elements.textInput.value = '';
+    elements.textInput.focus();
+    logMessage('Prompt text input cleared.');
 };
 
 elements.exportLogs.onclick = () => {

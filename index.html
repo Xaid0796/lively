@@ -89,7 +89,12 @@
 
             <h3 id="modeCardTitle">2. Text to Speech</h3>
 
-            <label for="textInput" id="promptLabel">Text to Read Aloud</label>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label for="textInput" id="promptLabel" style="margin-bottom: 0;">Text to Read Aloud</label>
+                <button id="clearInputBtn" class="secondary"
+                    style="padding: 2px 8px; font-size: 14px; height: auto; line-height: 1; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: 4px;"
+                    title="Clear input">×</button>
+            </div>
             <textarea id="textInput" placeholder="Type the text you want Gemini to read aloud..."></textarea>
 
             <div class="preset-chips" id="presetChips"></div>
