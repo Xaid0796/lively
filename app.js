@@ -57,7 +57,8 @@ const elements = {
     statLatency: $('statLatency'),
     statChunks: $('statChunks'),
     statDuration: $('statDuration'),
-    clearInputBtn: $('clearInputBtn')
+    clearInputBtn: $('clearInputBtn'),
+    micBtn: $('micBtn')
 };
 
 /* ==========================================================================
@@ -1268,6 +1269,126 @@ elements.clearInputBtn.onclick = () => {
     elements.textInput.value = '';
     elements.textInput.focus();
     logMessage('Prompt text input cleared.');
+};
+
+/* ==========================================================================
+   Speech Recognition
+   ========================================================================== */
+let recognition = null;
+let isRecording = false;
+
+// Initialize SpeechRecognition if available
+function initSpeechRecognition() {
+    // Check for Web Speech API support
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+        logMessage('Speech recognition not supported in this browser.', true);
+        elements.micBtn.disabled = true;
+        elements.micBtn.title = 'Speech recognition not supported';
+        return null;
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = false;  // Stop after one utterance
+    recognition.interimResults = true;  // Show results as they happen
+    recognition.lang = 'en-US';
+
+    // Handle start
+    recognition.onstart = () => {
+        isRecording = true;
+        elements.micBtn.style.background = 'var(--danger)';
+        elements.micBtn.style.color = '#fff';
+        elements.micBtn.innerHTML = '🔴';
+        logMessage('Microphone recording started...');
+    };
+
+    // Handle result
+    recognition.onresult = (event) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+                finalTranscript += transcript;
+            } else {
+                interimTranscript += transcript;
+            }
+        }
+
+        // Append final transcript to existing text
+        if (finalTranscript) {
+            const currentValue = elements.textInput.value;
+            elements.textInput.value = currentValue + (currentValue ? ' ' : '') + finalTranscript;
+        }
+
+        // Update interim results in real-time (optional)
+        if (interimTranscript) {
+            elements.textInput.placeholder = interimTranscript + '...';
+        } else {
+            elements.textInput.placeholder = 'Type the text you want Gemini to read aloud...';
+        }
+    };
+
+    // Handle end (whether manually stopped or speech ended)
+    recognition.onend = () => {
+        if (isRecording) {
+            // This was a manual stop
+            isRecording = false;
+            elements.micBtn.style.background = '';
+            elements.micBtn.style.color = 'var(--accent-primary)';
+            elements.micBtn.innerHTML = '🎙️';
+            logMessage('Microphone recording stopped.');
+        }
+    };
+
+    // Handle error
+    recognition.onerror = (event) => {
+        isRecording = false;
+        elements.micBtn.style.background = '';
+        elements.micBtn.style.color = 'var(--accent-primary)';
+        elements.micBtn.innerHTML = '🎙️';
+
+        let errorMsg = 'Speech recognition error';
+        switch (event.error) {
+            case 'not-allowed':
+                errorMsg = 'Microphone access denied. Please allow microphone access and try again.';
+                break;
+            case 'no-speech':
+                errorMsg = 'No speech detected.';
+                break;
+            case 'audio-capture':
+                errorMsg = 'No microphone found.';
+                break;
+            default:
+                errorMsg = `Speech recognition error: ${event.error}`;
+        }
+
+        logMessage(errorMsg, true);
+        elements.textInput.placeholder = 'Type the text you want Gemini to read aloud...';
+    };
+
+    logMessage('Speech recognition initialized.');
+    return recognition;
+}
+
+// Toggle microphone recording
+elements.micBtn.onclick = () => {
+    if (!recognition) {
+        initSpeechRecognition();
+        return;
+    }
+
+    if (isRecording) {
+        recognition.stop();
+    } else {
+        try {
+            recognition.start();
+        } catch (e) {
+            logMessage('Failed to start recording: ' + e.message, true);
+        }
+    }
 };
 
 elements.exportLogs.onclick = () => {

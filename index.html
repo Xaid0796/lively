@@ -91,9 +91,14 @@
 
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <label for="textInput" id="promptLabel" style="margin-bottom: 0;">Text to Read Aloud</label>
-                <button id="clearInputBtn" class="secondary"
-                    style="padding: 2px 8px; font-size: 14px; height: auto; line-height: 1; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: 4px;"
-                    title="Clear input">×</button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button id="micBtn" class="secondary"
+                        style="padding: 2px 8px; font-size: 14px; height: auto; line-height: 1; background: transparent; color: var(--accent-primary); border: 1px solid var(--accent-primary); border-radius: 4px;"
+                        title="Start/Stop microphone">🎙️</button>
+                    <button id="clearInputBtn" class="secondary"
+                        style="padding: 2px 8px; font-size: 14px; height: auto; line-height: 1; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: 4px;"
+                        title="Clear input">×</button>
+                </div>
             </div>
             <textarea id="textInput" placeholder="Type the text you want Gemini to read aloud..."></textarea>
 
