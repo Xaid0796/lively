@@ -38,7 +38,7 @@ const GEMINI_CONFIG = Object.freeze({
     maxTokensStorageKey: 'gemini_live_max_tokens',
 
     /** Default max output tokens for responses (~1 min duration default). */
-    defaultMaxOutputTokens: 512,
+    defaultMaxOutputTokens: 2040,
 
     /* ---------------------------------------------------------------------- *
      * Live API Transport Configuration

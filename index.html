@@ -92,8 +92,9 @@
             <h3 id="modeCardTitle">2. Text to Speech</h3>
 
             <!-- Image Upload Section -->
-            <div class="image-upload-section" id="imageUploadSection">
+            <div class="image-upload-section" id="imageUploadSection" data-dropzone>
                 <input type="file" id="imageUploadInput" accept="image/*" style="display: none;">
+                <div class="drop-hint" id="dropHint">📋 Drop image here or click to upload</div>
                 <button id="imageUploadBtn" class="secondary"
                     style="padding: 4px 8px; font-size: 12px; height: auto; line-height: 1;">
                     📷 Upload Image
@@ -193,13 +194,13 @@
             <div class="sidebar-section">
                 <div class="setting-label-row">
                     <label for="maxTokensSlider" style="margin-bottom:0;font-weight:600">Max Response Tokens</label>
-                    <span id="maxTokensVal" class="setting-val-badge">512 (~1 min)</span>
+                    <span id="maxTokensVal" class="setting-val-badge">2040 (~4 min)</span>
                 </div>
-                <input id="maxTokensSlider" type="range" min="100" max="2048" step="10" value="512"
+                <input id="maxTokensSlider" type="range" min="100" max="2048" step="10" value="2040"
                     style="width:100%;margin-top:10px;margin-bottom:6px">
                 <div class="slider-marks">
                     <span>100 (Short)</span>
-                    <span>512 (~1m)</span>
+                    <span>1024 (~2m)</span>
                     <span>2048 (Long)</span>
                 </div>
                 <small class="hint" style="margin-top:10px;display:block">

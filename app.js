@@ -66,6 +66,8 @@ const elements = {
     maxTokensSlider: $('maxTokensSlider'),
     maxTokensVal: $('maxTokensVal'),
     /* Image Upload Elements */
+    imageUploadSection: $('imageUploadSection'),
+    dropHint: $('dropHint'),
     imageUploadInput: $('imageUploadInput'),
     imageUploadBtn: $('imageUploadBtn'),
     imagePreviewContainer: $('imagePreviewContainer'),
@@ -418,24 +420,23 @@ if (elements.maxTokensSlider) {
 /* ==========================================================================
    Image Upload Handling
    ========================================================================== */
-elements.imageUploadBtn?.addEventListener('click', () => {
-    elements.imageUploadInput?.click();
-});
 
-elements.imageUploadInput?.addEventListener('change', (event) => {
-    const file = event.target.files[0];
+/**
+ * Shared image processing: validates the file, reads it as a data URL,
+ * and updates the preview UI. Used by the file input, drag-and-drop,
+ * and paste (Ctrl+V) handlers.
+ */
+function handleImageFile(file) {
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
         alert('Please select a valid image file (PNG, JPEG, etc.)');
-        event.target.value = '';
         return;
     }
 
     const maxSizeMB = 10;
     if (file.size > maxSizeMB * 1024 * 1024) {
         alert(`Image too large. Maximum size is ${maxSizeMB}MB.`);
-        event.target.value = '';
         return;
     }
 
@@ -448,9 +449,86 @@ elements.imageUploadInput?.addEventListener('change', (event) => {
         elements.imagePreview.src = e.target.result;
         elements.imagePreviewContainer.style.display = 'flex';
         elements.imagePreview.style.display = 'block';
+        elements.imageUploadSection?.classList.add('has-image');
         logMessage(`Image loaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB, ${file.type})`);
     };
     reader.readAsDataURL(file);
+}
+
+elements.imageUploadBtn?.addEventListener('click', () => {
+    elements.imageUploadInput?.click();
+});
+
+elements.imageUploadSection?.addEventListener('click', (e) => {
+    // Allow clicking anywhere in the drop zone to open the file picker,
+    // but ignore clicks on buttons inside it.
+    if (e.target === elements.imageUploadSection || e.target === elements.dropHint) {
+        elements.imageUploadInput?.click();
+    }
+});
+
+elements.imageUploadInput?.addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    handleImageFile(file);
+    event.target.value = '';
+});
+
+/* --- Drag-and-Drop Support --- */
+let dragCounter = 0;
+
+elements.imageUploadSection?.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter++;
+    elements.imageUploadSection.classList.add('drag-over');
+});
+
+elements.imageUploadSection?.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+});
+
+elements.imageUploadSection?.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter--;
+    if (dragCounter <= 0) {
+        dragCounter = 0;
+        elements.imageUploadSection.classList.remove('drag-over');
+    }
+});
+
+elements.imageUploadSection?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter = 0;
+    elements.imageUploadSection.classList.remove('drag-over');
+
+    const file = e.dataTransfer?.files?.[0];
+    if (file) {
+        handleImageFile(file);
+    }
+});
+
+/* --- Paste (Ctrl+V) Support --- */
+document.addEventListener('paste', (e) => {
+    // Only handle paste when the image upload section is visible (live mode)
+    if (elements.imageUploadSection?.style.display === 'none') return;
+
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of items) {
+        if (item.type.startsWith('image/')) {
+            e.preventDefault();
+            const file = item.getAsFile();
+            if (file) {
+                handleImageFile(file);
+                logMessage('Image pasted from clipboard.');
+            }
+            break;
+        }
+    }
 });
 
 elements.removeImageBtn?.addEventListener('click', () => {
@@ -458,6 +536,7 @@ elements.removeImageBtn?.addEventListener('click', () => {
     elements.imagePreviewContainer.style.display = 'none';
     elements.imagePreview.src = '';
     elements.imageUploadInput.value = '';
+    elements.imageUploadSection?.classList.remove('has-image');
     logMessage('Image removed.');
 });
 

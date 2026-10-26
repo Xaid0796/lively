@@ -399,8 +399,48 @@ button.danger:hover:not(:disabled) {
 }
 
 /* ==========================================================================
+   Image Upload Section & Drag/Drop Styling
+   ========================================================================== */
+
+.image-upload-section {
+    border: 2px dashed var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    text-align: center;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    margin-bottom: 12px;
+}
+
+.image-upload-section.drag-over {
+    border-color: var(--accent-primary);
+    background-color: rgba(117, 101, 245, 0.08);
+    transform: translateY(-1px);
+}
+
+.image-upload-section.drag-over .drop-hint {
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+
+.drop-hint {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.image-upload-section.has-image .drop-hint {
+    display: none;
+}
+
+/* ==========================================================================
    Workflow Mode Switcher (Text to Speech / Live Voice Query)
    ========================================================================== */
+
 .mode-switch {
     display: flex;
     gap: 6px;
