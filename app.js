@@ -58,7 +58,19 @@ const elements = {
     statChunks: $('statChunks'),
     statDuration: $('statDuration'),
     clearInputBtn: $('clearInputBtn'),
-    micBtn: $('micBtn')
+    micBtn: $('micBtn'),
+    sidebarToggleBtn: $('sidebarToggleBtn'),
+    sidebarCloseBtn: $('sidebarCloseBtn'),
+    sidebar: $('sidebar'),
+    sidebarOverlay: $('sidebarOverlay'),
+    maxTokensSlider: $('maxTokensSlider'),
+    maxTokensVal: $('maxTokensVal'),
+    /* Image Upload Elements */
+    imageUploadInput: $('imageUploadInput'),
+    imageUploadBtn: $('imageUploadBtn'),
+    imagePreviewContainer: $('imagePreviewContainer'),
+    imagePreview: $('imagePreview'),
+    removeImageBtn: $('removeImageBtn')
 };
 
 /* ==========================================================================
@@ -101,7 +113,10 @@ const state = {
     /* Workflow state */
     mode: GEMINI_CONFIG.defaultMode,
     transcriptParts: [],
-    turnComplete: false
+    turnComplete: false,
+
+    /* Image state */
+    uploadedImage: null  // { dataURL: string, mimeType: string }
 };
 
 /* ==========================================================================
@@ -187,6 +202,7 @@ function setMode(modeId) {
     state.mode = modeId;
     const mode = getActiveMode();
     localStorage.setItem(GEMINI_CONFIG.modeStorageKey, modeId);
+    state.uploadedImage = null;  // Clear image when switching modes
 
     elements.modeCardTitle.textContent = mode.cardTitle;
     elements.promptLabel.textContent = mode.promptLabel;
@@ -195,13 +211,23 @@ function setMode(modeId) {
 
     applyModeControlVisibility();
 
+    // Show/hide image upload based on mode
+    if (state.mode === 'live') {
+        elements.imageUploadSection.style.display = 'block';
+    } else {
+        elements.imageUploadSection.style.display = 'none';
+    }
+
+    // Hide image preview and clear any uploaded image
+    elements.imagePreviewContainer.style.display = 'none';
+    elements.textInput.value = '';
+
     // Keep the tab strip in sync with the active workflow.
     document.querySelectorAll('.mode-tab').forEach((tab) => {
         tab.classList.toggle('active', tab.dataset.mode === state.mode);
     });
 
     renderPresets(mode.presets);
-    elements.textInput.value = '';
 
     logMessage(`Workflow mode switched to: ${mode.label}`);
 
@@ -229,16 +255,41 @@ function renderPresets(presets) {
     });
 }
 
+/**
+ * Builds the prompt payload for sending to Gemini.
+ * Supports both text-only and image+text inputs.
+ * @param {string} text - The text to send (can be empty if only sending image)
+ * @returns {Object} The payload object for WebSocket send
+ */
 function buildPromptPayload(text) {
     const mode = getActiveMode();
     const finalText = mode.promptPrefix ? `${mode.promptPrefix}${text}` : text;
+
+    const parts = [];
+
+    // Add image if present (for Live Voice Query mode)
+    if (state.uploadedImage) {
+        // Convert dataURL to base64 (remove the data:image/...;base64, prefix)
+        const base64Data = state.uploadedImage.dataURL.split(',')[1];
+        parts.push({
+            inlineData: {
+                mimeType: state.uploadedImage.mimeType,
+                data: base64Data
+            }
+        });
+    }
+
+    // Add text part
+    if (finalText.trim()) {
+        parts.push({ text: finalText.trim() });
+    }
 
     return {
         clientContent: {
             turns: [
                 {
                     role: 'user',
-                    parts: [{ text: finalText }]
+                    parts: parts
                 }
             ],
             turnComplete: true
@@ -284,9 +335,25 @@ function loadPreferences() {
     renderPresets(mode.presets);
     applyModeControlVisibility();
 
+    // Show image upload section only in Live mode
+    if (state.mode === 'live') {
+        elements.imageUploadSection.style.display = 'block';
+    } else {
+        elements.imageUploadSection.style.display = 'none';
+        elements.imagePreviewContainer.style.display = 'none';
+    }
+
     document.querySelectorAll('.mode-tab').forEach((tab) => {
         tab.classList.toggle('active', tab.dataset.mode === state.mode);
     });
+
+    const savedMaxTokens = localStorage.getItem(GEMINI_CONFIG.maxTokensStorageKey) || GEMINI_CONFIG.defaultMaxOutputTokens;
+    if (elements.maxTokensSlider) {
+        elements.maxTokensSlider.value = savedMaxTokens;
+    }
+    if (elements.maxTokensVal) {
+        elements.maxTokensVal.textContent = savedMaxTokens;
+    }
 }
 
 elements.saveKey.onclick = () => {
@@ -314,6 +381,87 @@ document.querySelectorAll('.mode-tab').forEach((tab) => {
 });
 
 /* ==========================================================================
+   Sidebar & Settings Drawer Controls
+   ========================================================================== */
+function openSidebar() {
+    if (elements.sidebar) elements.sidebar.classList.add('open');
+    if (elements.sidebarOverlay) elements.sidebarOverlay.classList.add('open');
+}
+
+function closeSidebar() {
+    if (elements.sidebar) elements.sidebar.classList.remove('open');
+    if (elements.sidebarOverlay) elements.sidebarOverlay.classList.remove('open');
+}
+
+if (elements.sidebarToggleBtn) {
+    elements.sidebarToggleBtn.onclick = openSidebar;
+}
+
+if (elements.sidebarCloseBtn) {
+    elements.sidebarCloseBtn.onclick = closeSidebar;
+}
+
+if (elements.sidebarOverlay) {
+    elements.sidebarOverlay.onclick = closeSidebar;
+}
+
+if (elements.maxTokensSlider) {
+    elements.maxTokensSlider.oninput = (e) => {
+        const val = e.target.value;
+        if (elements.maxTokensVal) {
+            elements.maxTokensVal.textContent = val;
+        }
+        localStorage.setItem(GEMINI_CONFIG.maxTokensStorageKey, val);
+    };
+}
+
+/* ==========================================================================
+   Image Upload Handling
+   ========================================================================== */
+elements.imageUploadBtn?.addEventListener('click', () => {
+    elements.imageUploadInput?.click();
+});
+
+elements.imageUploadInput?.addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+        alert('Please select a valid image file (PNG, JPEG, etc.)');
+        event.target.value = '';
+        return;
+    }
+
+    const maxSizeMB = 10;
+    if (file.size > maxSizeMB * 1024 * 1024) {
+        alert(`Image too large. Maximum size is ${maxSizeMB}MB.`);
+        event.target.value = '';
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        state.uploadedImage = {
+            dataURL: e.target.result,
+            mimeType: file.type
+        };
+        elements.imagePreview.src = e.target.result;
+        elements.imagePreviewContainer.style.display = 'flex';
+        elements.imagePreview.style.display = 'block';
+        logMessage(`Image loaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB, ${file.type})`);
+    };
+    reader.readAsDataURL(file);
+});
+
+elements.removeImageBtn?.addEventListener('click', () => {
+    state.uploadedImage = null;
+    elements.imagePreviewContainer.style.display = 'none';
+    elements.imagePreview.src = '';
+    elements.imageUploadInput.value = '';
+    logMessage('Image removed.');
+});
+
+/* ==========================================================================
    WebSocket Session Lifecycle
    ========================================================================== */
 function clearSessionTimeout() {
@@ -325,12 +473,19 @@ function clearSessionTimeout() {
 
 function buildSetupPayload() {
     const mode = getActiveMode();
+    const maxTokens = parseInt(
+        elements.maxTokensSlider
+            ? elements.maxTokensSlider.value
+            : (localStorage.getItem(GEMINI_CONFIG.maxTokensStorageKey) || GEMINI_CONFIG.defaultMaxOutputTokens),
+        10
+    );
 
     return {
         setup: {
             model: `models/${GEMINI_CONFIG.model}`,
             generationConfig: {
                 responseModalities: ['AUDIO'],
+                maxOutputTokens: maxTokens,
                 speechConfig: {
                     voiceConfig: {
                         prebuiltVoiceConfig: {
@@ -421,7 +576,7 @@ function connectSession() {
             } catch (_) {
                 /* ignore */
             }
-            handleConnectionFailure(currentSession, 'Handshake timed out.');
+            handleConnectionFailure(0, 'Handshake timed out.');
         }, GEMINI_CONFIG.handshakeTimeoutMs);
 
         socket.onopen = () => {
@@ -690,8 +845,8 @@ elements.speakBtn.onclick = () => {
         updateStatus('Error: Not connected to live session.', true);
         return;
     }
-    if (!text) {
-        alert('Please enter text before sending.');
+    if (!text && !state.uploadedImage) {
+        alert('Please enter text or upload an image before sending.');
         elements.textInput.focus();
         return;
     }
@@ -714,7 +869,11 @@ elements.speakBtn.onclick = () => {
     elements.resultBox.textContent = getActiveMode().id === 'tts'
         ? 'Generating speech...'
         : 'Sending query to Gemini Live...';
-    logMessage(`Sending request (${text.length} characters) in "${getActiveMode().label}" mode.`);
+
+    const infoMsg = state.uploadedImage
+        ? `Sending request (${state.uploadedImage.dataURL.length} chars base64 image + ${text.length} chars text)`
+        : text;
+    logMessage(`Sending request in "${getActiveMode().label}" mode.${state.uploadedImage ? ' [Image attached]' : ''}`);
 
     try {
         state.ws.send(JSON.stringify(buildPromptPayload(text)));
@@ -1011,6 +1170,7 @@ function stopAudioPlayback() {
         elements.playAudioBtn.disabled = true;
         elements.stopAudioBtn.disabled = true;
         elements.seekSlider.disabled = true;
+        elements.resultBox.textContent = 'Stream stopped.';
     }
     elements.pauseAudioBtn.disabled = true;
     elements.seekSlider.value = 0;
@@ -1414,6 +1574,10 @@ document.addEventListener('keydown', (event) => {
     if (event.ctrlKey && event.key === 'Enter') {
         event.preventDefault();
         elements.speakBtn.click();
+        return;
+    }
+    if (event.key === 'Escape') {
+        closeSidebar();
         return;
     }
     if (typing) return;

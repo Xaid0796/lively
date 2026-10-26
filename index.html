@@ -22,6 +22,8 @@
         </div>
         <div class="header-actions">
             <span id="connectionBadge" class="badge disconnected">Disconnected</span>
+            <button id="sidebarToggleBtn" class="secondary"
+                style="width:auto;margin-top:0;padding:8px 12px;font-size:12px">⚙️ Parameters</button>
             <button id="themeToggle" class="secondary"
                 style="width:auto;margin-top:0;padding:8px 12px;font-size:12px">🌓 Theme</button>
         </div>
@@ -88,6 +90,22 @@
             </div>
 
             <h3 id="modeCardTitle">2. Text to Speech</h3>
+
+            <!-- Image Upload Section -->
+            <div class="image-upload-section" id="imageUploadSection">
+                <input type="file" id="imageUploadInput" accept="image/*" style="display: none;">
+                <button id="imageUploadBtn" class="secondary"
+                    style="padding: 4px 8px; font-size: 12px; height: auto; line-height: 1;">
+                    📷 Upload Image
+                </button>
+                <div id="imagePreviewContainer" style="display: none; margin-top: 8px;">
+                    <img id="imagePreview"
+                        style="max-width: 100%; max-height: 150px; border-radius: 4px; border: 1px solid var(--border-color);">
+                    <br>
+                    <button id="removeImageBtn" class="secondary danger"
+                        style="padding: 2px 6px; font-size: 10px; height: auto;">Remove</button>
+                </div>
+            </div>
 
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <label for="textInput" id="promptLabel" style="margin-bottom: 0;">Text to Read Aloud</label>
@@ -156,6 +174,41 @@
         <p>Gemini Live Voice Studio Professional &bull; Shared Configuration for Text to Speech & Live Voice Query
             &bull; Powered by Google Gemini API</p>
     </footer>
+
+    <!-- Sleek Collapsible Sidebar for Generation Parameters -->
+    <div id="sidebarOverlay" class="sidebar-overlay"></div>
+    <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <h3>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path
+                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                    </path>
+            </h3>
+            <button id="sidebarCloseBtn" title="Close Settings">×</button>
+        </div>
+        <div class="sidebar-body">
+            <div class="sidebar-section">
+                <div class="setting-label-row">
+                    <label for="maxTokensSlider" style="margin-bottom:0;font-weight:600">Max Response Tokens</label>
+                    <span id="maxTokensVal" class="setting-val-badge">512 (~1 min)</span>
+                </div>
+                <input id="maxTokensSlider" type="range" min="100" max="2048" step="10" value="512"
+                    style="width:100%;margin-top:10px;margin-bottom:6px">
+                <div class="slider-marks">
+                    <span>100 (Short)</span>
+                    <span>512 (~1m)</span>
+                    <span>2048 (Long)</span>
+                </div>
+                <small class="hint" style="margin-top:10px;display:block">
+                    Controls <code>maxOutputTokens</code> in Gemini's <code>generationConfig</code>. Speech output
+                    averages ~300–500 tokens per minute of audio.
+                </small>
+            </div>
+        </div>
+    </aside>
 
     <script src="config.js"></script>
     <script src="app.js"></script>

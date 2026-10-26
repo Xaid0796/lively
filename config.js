@@ -34,6 +34,12 @@ const GEMINI_CONFIG = Object.freeze({
     /** storage key used to persist the last selected workflow mode. */
     modeStorageKey: 'gemini_live_mode',
 
+    /** storage key used to persist max response tokens setting. */
+    maxTokensStorageKey: 'gemini_live_max_tokens',
+
+    /** Default max output tokens for responses (~1 min duration default). */
+    defaultMaxOutputTokens: 512,
+
     /* ---------------------------------------------------------------------- *
      * Live API Transport Configuration
      * ---------------------------------------------------------------------- */
