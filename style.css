@@ -53,9 +53,13 @@
     padding: 0;
 }
 
-html, body {
+html,
+body {
     overflow-x: hidden;
     width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
     -webkit-text-size-adjust: 100%;
     touch-action: manipulation;
 }
@@ -75,7 +79,7 @@ body {
 header {
     background-color: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
-    padding: max(12px, var(--sat)) max(20px, var(--sar)) 12px max(20px, var(--sal));
+    padding: max(10px, var(--sat)) 16px 10px 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -84,31 +88,40 @@ header {
     z-index: 100;
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    gap: 10px;
+    gap: 8px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 .brand {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
 }
 
 .brand h1 {
-    font-size: 20px;
+    font-size: 17px;
     font-weight: 700;
     letter-spacing: -0.5px;
     background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%);
     background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .header-actions {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: center;
-    flex-shrink: 0;
+    flex: 0 0 auto;
 }
 
 .header-btn {
@@ -117,10 +130,10 @@ header {
     justify-content: center;
     gap: 6px;
     margin-top: 0 !important;
-    padding: 8px 12px !important;
+    padding: 6px 10px !important;
     font-size: 12px !important;
     white-space: nowrap;
-    min-height: 36px;
+    min-height: 34px;
 }
 
 main {
@@ -129,13 +142,16 @@ main {
     margin: 0 auto;
     padding: 24px;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 24px;
+    box-sizing: border-box;
 }
 
 @media (max-width: 900px) {
     main {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
+        padding: 16px 12px;
+        gap: 16px;
     }
 }
 
@@ -147,9 +163,14 @@ main {
     background-color: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
-    padding: 24px;
+    padding: 20px;
     box-shadow: var(--shadow-lg);
     transition: transform 0.2s ease, border-color 0.2s ease;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .card:hover {
@@ -254,11 +275,15 @@ button.danger:hover:not(:disabled) {
 .row {
     display: flex;
     gap: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
 }
 
 .row>* {
-    flex: 1;
+    flex: 1 1 0;
     min-width: 0;
+    box-sizing: border-box;
 }
 
 .badge {
@@ -378,29 +403,38 @@ button.danger:hover:not(:disabled) {
 
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
     margin-top: 14px;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .stat-card {
     background-color: var(--bg-secondary);
-    padding: 10px;
+    padding: 8px 4px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border-color);
     text-align: center;
+    min-width: 0;
+    overflow: hidden;
+    box-sizing: border-box;
 }
 
 .stat-value {
     font-weight: 700;
-    font-size: 16px;
+    font-size: 14px;
     color: var(--accent-secondary);
+    word-break: break-all;
 }
 
 .stat-label {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-muted);
     margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .card-note {
@@ -471,25 +505,40 @@ button.danger:hover:not(:disabled) {
 
 .mode-switch {
     display: flex;
-    gap: 6px;
+    gap: 4px;
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    padding: 5px;
+    padding: 4px;
     margin-bottom: 16px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
 }
 
 .mode-tab {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
     margin-top: 0;
-    padding: 9px 12px;
+    padding: 8px 4px;
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     transition: all 0.2s ease;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    box-sizing: border-box;
+    min-height: 40px;
 }
 
 .mode-tab:hover:not(:disabled) {
@@ -672,6 +721,7 @@ footer {
         opacity: 0;
         transform: translateY(6px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -752,14 +802,29 @@ footer {
 }
 
 @keyframes pulseDot {
-    0% { transform: scale(0.9); opacity: 0.7; }
-    100% { transform: scale(1.25); opacity: 1; }
+    0% {
+        transform: scale(0.9);
+        opacity: 0.7;
+    }
+
+    100% {
+        transform: scale(1.25);
+        opacity: 1;
+    }
 }
 
 @keyframes spinDot {
-    0% { transform: scale(1) rotate(0deg); }
-    50% { transform: scale(1.3); }
-    100% { transform: scale(1) rotate(360deg); }
+    0% {
+        transform: scale(1) rotate(0deg);
+    }
+
+    50% {
+        transform: scale(1.3);
+    }
+
+    100% {
+        transform: scale(1) rotate(360deg);
+    }
 }
 
 .audio-level-wrapper {
@@ -822,8 +887,15 @@ footer {
 }
 
 @keyframes floatHalo {
-    0% { transform: scale(0.95); opacity: 0.6; }
-    100% { transform: scale(1.15); opacity: 0.9; }
+    0% {
+        transform: scale(0.95);
+        opacity: 0.6;
+    }
+
+    100% {
+        transform: scale(1.15);
+        opacity: 0.9;
+    }
 }
 
 #voiceOrbCanvas {
@@ -986,6 +1058,7 @@ footer {
         opacity: 0;
         transform: translateY(6px) scale(0.98);
     }
+
     to {
         opacity: 1;
         transform: translateY(0) scale(1);
@@ -1072,17 +1145,20 @@ footer {
 /* Smartphone & Compact Screens (<= 600px) */
 @media (max-width: 600px) {
     header {
-        padding: max(10px, var(--sat)) max(12px, var(--sar)) 10px max(12px, var(--sal));
-        gap: 8px;
+        padding: max(10px, var(--sat)) 10px 10px 10px;
+        gap: 6px;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
     }
 
     .brand {
-        gap: 8px;
+        gap: 6px;
         min-width: 0;
     }
 
     .brand h1 {
-        font-size: 15px;
+        font-size: 14px;
         letter-spacing: -0.3px;
         white-space: nowrap;
         overflow: hidden;
@@ -1090,19 +1166,19 @@ footer {
     }
 
     .header-actions {
-        gap: 5px;
+        gap: 4px;
         flex-shrink: 0;
     }
 
     .header-actions .badge {
-        padding: 3px 7px;
-        font-size: 10.5px;
+        padding: 3px 6px;
+        font-size: 10px;
     }
 
     .header-btn {
-        padding: 6px 9px !important;
+        padding: 6px 8px !important;
         font-size: 11px !important;
-        min-height: 32px;
+        min-height: 30px;
     }
 
     .header-btn .btn-text {
@@ -1110,25 +1186,41 @@ footer {
     }
 
     main {
-        padding: 12px 10px max(20px, var(--sab));
-        gap: 14px;
+        padding: 10px 8px max(20px, var(--sab));
+        gap: 12px;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
     }
 
     .card {
-        padding: 16px 14px;
+        padding: 14px 10px;
         border-radius: var(--radius-md);
+        width: 100%;
+        box-sizing: border-box;
+        max-width: 100%;
     }
 
     .card h3 {
-        font-size: 14.5px;
-        margin-bottom: 12px;
-        padding-bottom: 8px;
+        font-size: 14px;
+        margin-bottom: 10px;
+        padding-bottom: 6px;
     }
 
     .card-note {
-        font-size: 12px;
-        margin-bottom: 12px;
-        line-height: 1.5;
+        font-size: 11.5px;
+        margin-bottom: 10px;
+        line-height: 1.45;
+    }
+
+    /* Connection buttons on mobile: stacked for full touch target */
+    .connection-buttons-row {
+        flex-direction: column !important;
+        gap: 8px;
+    }
+
+    .connection-buttons-row button {
+        width: 100%;
     }
 
     /* Form Controls on Mobile: 16px font-size prevents mobile Safari auto-zoom */
@@ -1138,30 +1230,25 @@ footer {
     select,
     textarea {
         font-size: 16px !important;
-        padding: 10px 12px;
+        padding: 9px 11px;
     }
 
-    /* Mode Switcher Tabs - smooth horizontal swipe on touch */
+    /* Mode Switcher Tabs */
     .mode-switch {
         display: flex;
-        gap: 5px;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        padding: 4px;
-        margin-bottom: 14px;
-    }
-
-    .mode-switch::-webkit-scrollbar {
-        display: none;
+        gap: 3px;
+        padding: 3px;
+        margin-bottom: 12px;
+        width: 100%;
+        box-sizing: border-box;
     }
 
     .mode-tab {
-        flex: 1 0 auto;
-        white-space: nowrap;
-        padding: 8px 11px;
-        font-size: 12px;
-        min-height: 42px;
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 7px 3px;
+        font-size: 11px;
+        min-height: 38px;
     }
 
     /* Voice Bot Controls: Full width call button on top, secondary buttons side-by-side below */
@@ -1303,6 +1390,7 @@ footer {
 
 /* Touch-specific interaction optimizations (Phones & Tablets) */
 @media (hover: none) and (pointer: coarse) {
+
     button,
     .chip,
     .mode-tab,

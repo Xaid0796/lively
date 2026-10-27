@@ -2200,6 +2200,8 @@ async function initVoiceChatMicrophone() {
     processor.connect(silentGain);
     silentGain.connect(state.audioCtx.destination);
 
+    let preRollChunks = [];
+
     processor.onaudioprocess = (e) => {
         if (!state.voiceChat.isActive || state.voiceChat.isMuted) {
             if (elements.audioLevelFill) elements.audioLevelFill.style.width = '0%';
@@ -2216,7 +2218,8 @@ async function initVoiceChatMicrophone() {
         const rms = Math.sqrt(sum / inputData.length);
 
         if (elements.audioLevelFill) {
-            elements.audioLevelFill.style.width = Math.min(100, Math.round(rms * 450)) + '%';
+            // Responsive meter scaling (750x) so mobile microphones give active visual feedback
+            elements.audioLevelFill.style.width = Math.min(100, Math.round(rms * 750)) + '%';
         }
 
         const now = performance.now();
@@ -2231,25 +2234,29 @@ async function initVoiceChatMicrophone() {
         // Prevents speaker audio feedback loop and false speech triggers
         if (isAiSpeaking || isThinking || inEchoTail) {
             state.voiceChat.consecutiveSpeechFrames = 0;
-            // Still show mic level so UI doesn't look frozen
+            preRollChunks = [];
             return;
         }
 
-        // Adaptive Sensitivity & Noise Filtering
-        let baseThreshold = 0.052; // 'smart' default
+        // Detect mobile device for calibrated microphone gain
+        const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+            (window.matchMedia && window.matchMedia('(max-width: 800px)').matches && 'ontouchstart' in window);
+
+        // Mobile microphones with AGC generally output RMS between 0.010 and 0.030 for normal speaking voices
+        let baseThreshold = isMobileDevice ? 0.012 : 0.022;
         if (state.voiceChat.sensitivityMode === 'noisy') {
-            baseThreshold = 0.078;
+            baseThreshold = isMobileDevice ? 0.025 : 0.042;
         } else if (state.voiceChat.sensitivityMode === 'quiet') {
-            baseThreshold = 0.035;
+            baseThreshold = isMobileDevice ? 0.006 : 0.010;
         }
 
         // Calibrate ambient background noise floor during quiet moments
         if (rms < baseThreshold) {
-            state.voiceChat.noiseFloor = state.voiceChat.noiseFloor * 0.96 + rms * 0.04;
+            state.voiceChat.noiseFloor = state.voiceChat.noiseFloor * 0.94 + rms * 0.06;
         }
 
-        // Dynamic threshold: never lower than base, and always above room noise floor
-        const effectiveThreshold = Math.max(baseThreshold, state.voiceChat.noiseFloor * 1.85);
+        // Dynamic threshold: never lower than base, and adaptive to room noise floor
+        const effectiveThreshold = Math.max(baseThreshold, state.voiceChat.noiseFloor * 1.5);
 
         // Check if current frame exceeds threshold
         const isFrameAboveThreshold = rms > effectiveThreshold;
@@ -2262,9 +2269,19 @@ async function initVoiceChatMicrophone() {
             state.voiceChat.consecutiveSpeechFrames = 0;
         }
 
-        // SPEECH START: Require at least 3 consecutive frames (~140ms) of sustained audio to declare speech.
-        // This eliminates clicks, breathing pops, keyboard clatter, and ambient room spikes.
-        if (state.voiceChat.consecutiveSpeechFrames >= 3) {
+        // Convert audio chunk to 16kHz PCM
+        const resampled = downsampleBuffer(inputData, e.inputBuffer.sampleRate, 16000);
+        const pcm16 = floatTo16BitPCM(resampled);
+        const base64Pcm = arrayBufferToBase64(pcm16);
+
+        // Maintain rolling 3-frame (~130ms) pre-roll buffer so initial words are never clipped
+        if (state.voiceChat.botState !== 'user-speaking') {
+            preRollChunks.push(base64Pcm);
+            if (preRollChunks.length > 3) preRollChunks.shift();
+        }
+
+        // SPEECH START: Require 2 consecutive frames (~85ms) of audio to declare speech.
+        if (state.voiceChat.consecutiveSpeechFrames >= 2) {
             state.voiceChat.lastVADTimestamp = now;
             state.voiceChat.hasSpokenInTurn = true;
 
@@ -2272,6 +2289,23 @@ async function initVoiceChatMicrophone() {
                 setVoiceBotState('user-speaking');
                 if (!state.voiceChat.currentUserBubble) {
                     appendUserDialogue('🎙️ Speaking...', false);
+                }
+
+                // Immediately flush pre-roll audio so Ustad Live receives the beginning of the sentence
+                if (state.ws && state.ws.readyState === WebSocket.OPEN && preRollChunks.length > 0) {
+                    for (const chunk of preRollChunks) {
+                        try {
+                            state.ws.send(JSON.stringify({
+                                realtimeInput: {
+                                    mediaChunks: [{
+                                        mimeType: 'audio/pcm;rate=16000',
+                                        data: chunk
+                                    }]
+                                }
+                            }));
+                        } catch (_) {}
+                    }
+                    preRollChunks = [];
                 }
             }
 
@@ -2281,12 +2315,8 @@ async function initVoiceChatMicrophone() {
             }
         }
 
-        // STREAM AUDIO: While user is speaking, downsample to 16kHz and send to Gemini Live
+        // STREAM AUDIO: While user is speaking, stream 16kHz PCM chunks live to Ustad Live
         if (state.voiceChat.botState === 'user-speaking' && state.ws && state.ws.readyState === WebSocket.OPEN) {
-            const resampled = downsampleBuffer(inputData, e.inputBuffer.sampleRate, 16000);
-            const pcm16 = floatTo16BitPCM(resampled);
-            const base64Pcm = arrayBufferToBase64(pcm16);
-
             try {
                 state.ws.send(JSON.stringify({
                     realtimeInput: {
@@ -2303,7 +2333,6 @@ async function initVoiceChatMicrophone() {
 
         // SPEECH END / TURN COMPLETION:
         // After user stops speaking, wait for 2 full seconds of silence before triggering response.
-        // ~7 consecutive silent frames (~320ms) to confirm speech has ended, then 2000ms timer.
         if (state.voiceChat.botState === 'user-speaking' && state.voiceChat.hasSpokenInTurn) {
             if (state.voiceChat.consecutiveSilenceFrames >= 7 && !state.voiceChat.silenceTimer) {
                 state.voiceChat.silenceTimer = setTimeout(() => {
@@ -2372,7 +2401,7 @@ function finishUserVoiceTurn() {
             }));
             logMessage(`Dispatched spoken query to Ustad Live: "${userQuery}"`);
         } else {
-            // Native audio turn completion: tell Gemini Live the voice stream turn is complete
+            // Native audio turn completion: tell Ustad Live the voice stream turn is complete
             // so it responds directly to the streamed 16kHz PCM audio without requiring client-side SpeechRecognition.
             state.ws.send(JSON.stringify({
                 clientContent: {
@@ -2380,10 +2409,14 @@ function finishUserVoiceTurn() {
                 }
             }));
             logMessage('Dispatched turnComplete signal to Ustad Live for native audio query.');
+            // Note: Never call fetchAndStreamAiCaptions with dummy text ('Voice conversation response')
+            // as that triggers generic greeting loops! Ustad Live sends its own speech and text stream.
         }
 
-        // Stream text captions in real time for the AI response
-        fetchAndStreamAiCaptions(userQuery || 'Voice conversation response', 'voiceChat');
+        if (userQuery) {
+            // Stream text captions in real time for the AI response
+            fetchAndStreamAiCaptions(userQuery, 'voiceChat');
+        }
 
     } catch (e) {
         logMessage(`Turn completion dispatch error: ${e.message}`, true);
@@ -2605,7 +2638,7 @@ function processVoiceChatAudioChunk(base64Data) {
         const idx = state.voiceChat.activeAiAudioNodes.indexOf(sourceNode);
         if (idx !== -1) state.voiceChat.activeAiAudioNodes.splice(idx, 1);
 
-        if (state.voiceChat.activeAiAudioNodes.length === 0 && state.turnComplete) {
+        if (state.voiceChat.activeAiAudioNodes.length === 0) {
             if (state.voiceChat.isActive && state.voiceChat.botState === 'ai-speaking') {
                 const nowPerf = performance.now();
                 state.voiceChat.lastAiSpeechEndTime = nowPerf;

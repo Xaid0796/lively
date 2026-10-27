@@ -228,7 +228,7 @@ const GEMINI_CONFIG = Object.freeze({
     voiceChatConfig: {
         micSampleRate: 16000,
         chunkDurationMs: 100,
-        vadThreshold: 0.05,
+        vadThreshold: 0.015,
         vadDebounceMs: 150
     },
 

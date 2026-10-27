@@ -65,7 +65,7 @@
             <label for="voiceName">Prebuilt Voice</label>
             <select id="voiceName"></select>
 
-            <div class="row" style="margin-top:16px">
+            <div class="row connection-buttons-row" style="margin-top:16px">
                 <button id="connectBtn">Connect Live Session</button>
                 <button id="disconnectBtn" class="secondary danger" disabled>Disconnect</button>
             </div>
@@ -91,9 +91,15 @@
         <!-- Card 2: Workflow (Real-Time Voice Bot / Text to Speech / Live Voice Query) -->
         <div class="card">
             <div class="mode-switch" id="modeSwitch">
-                <button class="mode-tab active" data-mode="voiceChat">🎙️ Real-Time Voice Bot</button>
-                <button class="mode-tab" data-mode="tts">🗣 Text to Speech</button>
-                <button class="mode-tab" data-mode="live">💬 Live Voice Query</button>
+                <button class="mode-tab active" data-mode="voiceChat">
+                    <span class="tab-icon">🎙️</span> <span class="tab-label">Voice Bot</span>
+                </button>
+                <button class="mode-tab" data-mode="tts">
+                    <span class="tab-icon">🗣</span> <span class="tab-label">Text to Speech</span>
+                </button>
+                <button class="mode-tab" data-mode="live">
+                    <span class="tab-icon">💬</span> <span class="tab-label">Live Query</span>
+                </button>
             </div>
 
             <h3 id="modeCardTitle">2. Real-Time Voice Bot (Voice-to-Voice)</h3>
