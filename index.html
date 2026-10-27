@@ -3,7 +3,11 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#070a14">
     <title>Ustad Live Voice Studio - Professional Edition</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -12,8 +16,8 @@
 
     <header>
         <div class="brand">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-primary)">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-primary);flex-shrink:0">
                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
                 <path d="M19 10v1a7 7 0 0 1-14 0v-1"></path>
                 <line x1="12" y1="19" x2="12" y2="22"></line>
@@ -22,10 +26,12 @@
         </div>
         <div class="header-actions">
             <span id="connectionBadge" class="badge disconnected">Disconnected</span>
-            <button id="sidebarToggleBtn" class="secondary"
-                style="width:auto;margin-top:0;padding:8px 12px;font-size:12px">⚙️ Parameters</button>
-            <button id="themeToggle" class="secondary"
-                style="width:auto;margin-top:0;padding:8px 12px;font-size:12px">🌓 Theme</button>
+            <button id="sidebarToggleBtn" class="secondary header-btn" title="Parameters">
+                <span class="btn-icon">⚙️</span><span class="btn-text"> Parameters</span>
+            </button>
+            <button id="themeToggle" class="secondary header-btn" title="Toggle Theme">
+                <span class="btn-icon">🌓</span><span class="btn-text"> Theme</span>
+            </button>
         </div>
     </header>
 
@@ -207,7 +213,7 @@
                 </div>
 
                 <!-- Player Controls & Seek Bar -->
-                <div class="row" style="margin-top:10px">
+                <div class="row player-controls-row" style="margin-top:10px">
                     <button id="playAudioBtn" class="secondary" disabled>▶ Play</button>
                     <button id="pauseAudioBtn" class="secondary" disabled>⏸ Pause</button>
                     <button id="stopAudioBtn" class="secondary" disabled>⏹ Stop</button>

@@ -3,6 +3,10 @@
    Version: 3.8.1-Pro
    ========================================================================== */
 :root {
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
     --bg-primary: #070a14;
     --bg-secondary: #0f172a;
     --bg-card: #151d32;
@@ -49,6 +53,13 @@
     padding: 0;
 }
 
+html, body {
+    overflow-x: hidden;
+    width: 100%;
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
+}
+
 body {
     background-color: var(--bg-primary);
     color: var(--text-main);
@@ -56,6 +67,7 @@ body {
     font-size: 14px;
     line-height: 1.6;
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
 }
@@ -63,7 +75,7 @@ body {
 header {
     background-color: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
-    padding: 16px 24px;
+    padding: max(12px, var(--sat)) max(20px, var(--sar)) 12px max(20px, var(--sal));
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -71,12 +83,15 @@ header {
     top: 0;
     z-index: 100;
     backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    gap: 10px;
 }
 
 .brand {
     display: flex;
     align-items: center;
     gap: 12px;
+    min-width: 0;
 }
 
 .brand h1 {
@@ -91,8 +106,21 @@ header {
 
 .header-actions {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
+    flex-shrink: 0;
+}
+
+.header-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 0 !important;
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+    white-space: nowrap;
+    min-height: 36px;
 }
 
 main {
@@ -1026,4 +1054,272 @@ footer {
     border: 1px dashed var(--border-color);
     border-radius: var(--radius-md);
     padding: 10px 12px;
+}
+
+/* ==========================================================================
+   Mobile & Responsive Stylesheet Extensions
+   ========================================================================== */
+
+/* Tablet & Mobile Screens (<= 900px) */
+@media (max-width: 900px) {
+    main {
+        grid-template-columns: 1fr;
+        padding: 18px 16px;
+        gap: 18px;
+    }
+}
+
+/* Smartphone & Compact Screens (<= 600px) */
+@media (max-width: 600px) {
+    header {
+        padding: max(10px, var(--sat)) max(12px, var(--sar)) 10px max(12px, var(--sal));
+        gap: 8px;
+    }
+
+    .brand {
+        gap: 8px;
+        min-width: 0;
+    }
+
+    .brand h1 {
+        font-size: 15px;
+        letter-spacing: -0.3px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .header-actions {
+        gap: 5px;
+        flex-shrink: 0;
+    }
+
+    .header-actions .badge {
+        padding: 3px 7px;
+        font-size: 10.5px;
+    }
+
+    .header-btn {
+        padding: 6px 9px !important;
+        font-size: 11px !important;
+        min-height: 32px;
+    }
+
+    .header-btn .btn-text {
+        display: none;
+    }
+
+    main {
+        padding: 12px 10px max(20px, var(--sab));
+        gap: 14px;
+    }
+
+    .card {
+        padding: 16px 14px;
+        border-radius: var(--radius-md);
+    }
+
+    .card h3 {
+        font-size: 14.5px;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+    }
+
+    .card-note {
+        font-size: 12px;
+        margin-bottom: 12px;
+        line-height: 1.5;
+    }
+
+    /* Form Controls on Mobile: 16px font-size prevents mobile Safari auto-zoom */
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    select,
+    textarea {
+        font-size: 16px !important;
+        padding: 10px 12px;
+    }
+
+    /* Mode Switcher Tabs - smooth horizontal swipe on touch */
+    .mode-switch {
+        display: flex;
+        gap: 5px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding: 4px;
+        margin-bottom: 14px;
+    }
+
+    .mode-switch::-webkit-scrollbar {
+        display: none;
+    }
+
+    .mode-tab {
+        flex: 1 0 auto;
+        white-space: nowrap;
+        padding: 8px 11px;
+        font-size: 12px;
+        min-height: 42px;
+    }
+
+    /* Voice Bot Controls: Full width call button on top, secondary buttons side-by-side below */
+    .voice-controls-bar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .primary-voice-btn {
+        grid-column: 1 / -1;
+        width: 100%;
+        min-height: 48px;
+        font-size: 14.5px;
+        padding: 12px 16px;
+    }
+
+    #muteVoiceChatBtn {
+        grid-column: 1;
+        min-height: 44px;
+        padding: 10px 12px;
+        font-size: 12.5px;
+    }
+
+    #interruptVoiceChatBtn {
+        grid-column: 2;
+        min-height: 44px;
+        padding: 10px 12px;
+        font-size: 12.5px;
+    }
+
+    /* Voice Orb Container */
+    .voice-orb-container {
+        height: 200px;
+        margin: 10px 0 12px;
+    }
+
+    .voice-orb-subtext {
+        font-size: 11px;
+        padding: 2px 10px;
+    }
+
+    /* Dialogue & Captions */
+    .voice-dialogue-box {
+        min-height: 140px;
+        max-height: 240px;
+    }
+
+    .dialogue-bubble {
+        max-width: 94%;
+    }
+
+    .bubble-content {
+        padding: 8px 11px;
+        font-size: 13px;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        margin-top: 12px;
+    }
+
+    .stat-card {
+        padding: 8px 4px;
+    }
+
+    .stat-value {
+        font-size: 14px;
+    }
+
+    .stat-label {
+        font-size: 9.5px;
+    }
+
+    /* Action Rows & Player Controls */
+    .row {
+        gap: 8px;
+    }
+
+    .row button {
+        min-height: 42px;
+        font-size: 13px;
+    }
+
+    .player-controls-row {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    /* Seek Slider Bar */
+    .seek-container {
+        padding: 8px 10px;
+        gap: 8px;
+    }
+
+    /* Logs viewer */
+    #logs {
+        max-height: 200px;
+        font-size: 11px;
+        padding: 10px;
+    }
+
+    /* Preset Chips */
+    .preset-chips {
+        gap: 5px;
+    }
+
+    .chip {
+        padding: 6px 10px;
+        font-size: 11.5px;
+        min-height: 34px;
+        display: inline-flex;
+        align-items: center;
+    }
+}
+
+/* Extra Small Phones (<= 375px) */
+@media (max-width: 375px) {
+    .brand h1 {
+        font-size: 13.5px;
+    }
+
+    .primary-voice-btn {
+        font-size: 13.5px;
+    }
+
+    .voice-control-btn {
+        font-size: 11.5px;
+        padding: 8px 6px;
+    }
+
+    .card {
+        padding: 14px 10px;
+    }
+}
+
+/* Touch-specific interaction optimizations (Phones & Tablets) */
+@media (hover: none) and (pointer: coarse) {
+    button,
+    .chip,
+    .mode-tab,
+    select {
+        cursor: default;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    button:active:not(:disabled),
+    .chip:active,
+    .mode-tab:active:not(:disabled) {
+        transform: scale(0.98);
+        opacity: 0.9;
+    }
+
+    .card:hover {
+        border-color: var(--border-color);
+        transform: none;
+    }
 }

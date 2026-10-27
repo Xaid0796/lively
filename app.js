@@ -1677,7 +1677,13 @@ const canvasCtx = canvas.getContext('2d');
 
 function initVisualizer() {
     function resizeCanvas() {
-        canvas.width = canvas.parentElement.clientWidth - 48;
+        const parent = canvas.parentElement;
+        if (!parent) return;
+        const rect = parent.getBoundingClientRect();
+        const style = window.getComputedStyle(parent);
+        const pLeft = parseFloat(style.paddingLeft) || 0;
+        const pRight = parseFloat(style.paddingRight) || 0;
+        canvas.width = Math.max(100, Math.floor(rect.width - pLeft - pRight));
         canvas.height = 80;
     }
     resizeCanvas();
@@ -1843,8 +1849,13 @@ function initSpeechRecognition() {
     return recognition;
 }
 
-// Toggle microphone recording
+// Toggle microphone recording for text inputs
 elements.micBtn.onclick = () => {
+    if (state.voiceChat.isActive) {
+        alert('Voice conversation is currently active. Please use the Voice Bot controls or stop the conversation first.');
+        return;
+    }
+
     if (!recognition) {
         initSpeechRecognition();
         return;
@@ -2010,8 +2021,9 @@ function initVoiceOrb() {
     function resizeOrb() {
         if (!canvas.parentElement) return;
         const rect = canvas.parentElement.getBoundingClientRect();
-        canvas.width = rect.width * (window.devicePixelRatio || 1);
-        canvas.height = rect.height * (window.devicePixelRatio || 1);
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.max(100, Math.floor(rect.width * dpr));
+        canvas.height = Math.max(100, Math.floor(rect.height * dpr));
     }
     resizeOrb();
     window.addEventListener('resize', resizeOrb);
@@ -2258,6 +2270,9 @@ async function initVoiceChatMicrophone() {
 
             if (state.voiceChat.botState !== 'user-speaking' && state.voiceChat.botState !== 'interrupted') {
                 setVoiceBotState('user-speaking');
+                if (!state.voiceChat.currentUserBubble) {
+                    appendUserDialogue('🎙️ Speaking...', false);
+                }
             }
 
             if (state.voiceChat.silenceTimer) {
@@ -2310,10 +2325,16 @@ async function initVoiceChatMicrophone() {
 function finishUserVoiceTurn() {
     if (!state.voiceChat.isActive || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
 
-    const userQuery = (
+    let userQuery = (
         (state.voiceChat.currentTurnUserText || '') +
         (state.voiceChat.lastInterimText ? ' ' + state.voiceChat.lastInterimText : '')
-    ).trim() || (state.voiceChat.currentUserBubble?.querySelector('.bubble-content')?.textContent || '').trim();
+    ).trim();
+    if (!userQuery) {
+        const bubbleText = state.voiceChat.currentUserBubble?.querySelector('.bubble-content')?.textContent || '';
+        if (bubbleText && !bubbleText.includes('Speaking...')) {
+            userQuery = bubbleText.trim();
+        }
+    }
 
     logMessage(`2-second silence confirmed. Initiating model response for: "${userQuery || '[Voice Query]'}"`);
     setVoiceBotState('thinking');
@@ -2321,6 +2342,14 @@ function finishUserVoiceTurn() {
     try {
         state.voiceChat.speechRecognition?.abort();
     } catch (_) {}
+
+    // Finalize user dialogue bubble in the conversation history
+    if (userQuery) {
+        appendUserDialogue(userQuery, true);
+    } else {
+        appendUserDialogue('🎙️ Spoken voice query', true);
+    }
+
     state.voiceChat.hasSpokenInTurn = false;
     state.voiceChat.consecutiveSpeechFrames = 0;
     state.voiceChat.consecutiveSilenceFrames = 0;
@@ -2331,7 +2360,7 @@ function finishUserVoiceTurn() {
     try {
         if (userQuery) {
             // Send clientContent turn containing the user's query text with turnComplete: true.
-            // This triggers Gemini Live to generate its spoken audio response answering the query.
+            // This triggers Ustad Live to generate its spoken audio response answering the query.
             state.ws.send(JSON.stringify({
                 clientContent: {
                     turns: [{
@@ -2343,26 +2372,14 @@ function finishUserVoiceTurn() {
             }));
             logMessage(`Dispatched spoken query to Ustad Live: "${userQuery}"`);
         } else {
-            // Fallback if audio was streamed but SpeechRecognition text was not captured:
-            // Flush audio stream buffer with audioStreamEnd and send turnComplete prompt
-            try {
-                state.ws.send(JSON.stringify({
-                    realtimeInput: {
-                        audioStreamEnd: true
-                    }
-                }));
-            } catch (_) {}
-
+            // Native audio turn completion: tell Gemini Live the voice stream turn is complete
+            // so it responds directly to the streamed 16kHz PCM audio without requiring client-side SpeechRecognition.
             state.ws.send(JSON.stringify({
                 clientContent: {
-                    turns: [{
-                        role: 'user',
-                        parts: [{ text: 'Please respond to my voice query.' }]
-                    }],
                     turnComplete: true
                 }
             }));
-            logMessage('Dispatched audioStreamEnd and voice turn prompt.');
+            logMessage('Dispatched turnComplete signal to Ustad Live for native audio query.');
         }
 
         // Stream text captions in real time for the AI response
@@ -2429,11 +2446,29 @@ function isModelSpeechEcho(text) {
  * Initializes continuous Web Speech API speech recognition for instant live captions of user speech.
  */
 function initVoiceChatSpeechRecognition() {
+    // 1. Mobile & Touch Screen Conflict Prevention:
+    // On Android (Chrome), the operating system locks the hardware microphone exclusively for getUserMedia.
+    // Concurrently initializing the Web Speech API triggers the Android OS system notification:
+    // "Speech recognition (this is from Google) can't record now as Google Chrome is recording."
+    // Because Ustad Live (Gemini 3.8 Live) natively processes raw 16kHz PCM microphone audio directly
+    // over the WebSocket, auxiliary client-side speech recognition is disabled on mobile devices.
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+        (window.matchMedia && window.matchMedia('(max-width: 800px)').matches && 'ontouchstart' in window);
+
+    if (isMobile) {
+        logMessage('Mobile device active: Direct 16kHz PCM audio streaming to Ustad Live is active (auxiliary SpeechRecognition bypassed to prevent Android microphone hardware lock conflicts).');
+        state.voiceChat.speechRecognitionAvailable = false;
+        return;
+    }
+
     const SpeechRecog = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecog) {
         logMessage('Speech recognition not available for client-side live captions.');
+        state.voiceChat.speechRecognitionAvailable = false;
         return;
     }
+
+    state.voiceChat.speechRecognitionAvailable = true;
 
     try {
         const recognition = new SpeechRecog();
@@ -2453,7 +2488,7 @@ function initVoiceChatSpeechRecognition() {
             const inEchoTail = (now < state.voiceChat.suppressUserTranscriptionUntil) ||
                 (now - state.voiceChat.lastAiSpeechEndTime < 650);
 
-            // === CRITICAL FIX: Suppress transcription when model is speaking, thinking, or in echo tail ===
+            // Suppress transcription when model is speaking, thinking, or in echo tail
             if (isAiSpeaking || isThinking || inEchoTail) {
                 return;
             }
@@ -2492,12 +2527,20 @@ function initVoiceChatSpeechRecognition() {
         };
 
         recognition.onerror = (e) => {
+            if (e.error === 'audio-capture' || e.error === 'not-allowed') {
+                logMessage(`Speech recognition hardware conflict (${e.error}). Disabling auxiliary speech recognition.`);
+                state.voiceChat.speechRecognitionAvailable = false;
+                try { recognition.abort(); } catch (_) {}
+                state.voiceChat.speechRecognition = null;
+                return;
+            }
             if (e.error !== 'no-speech') {
                 logMessage(`Live captions recognition event: ${e.error}`);
             }
         };
 
         recognition.onend = () => {
+            if (!state.voiceChat.speechRecognitionAvailable) return;
             if (state.voiceChat.isActive && !state.voiceChat.isMuted && !state.voiceChat.isSpeechRecognitionSuppressed) {
                 try { recognition.start(); } catch (_) {}
             }
@@ -2507,6 +2550,7 @@ function initVoiceChatSpeechRecognition() {
         recognition.start();
         logMessage('Live captions speech recognition active.');
     } catch (e) {
+        state.voiceChat.speechRecognitionAvailable = false;
         logMessage(`Speech recognition init notice: ${e.message}`);
     }
 }
