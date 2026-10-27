@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
-    <title>Gemini Live Voice Studio - Professional Edition</title>
+    <title>Ustad Live Voice Studio - Professional Edition</title>
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -18,7 +18,7 @@
                 <path d="M19 10v1a7 7 0 0 1-14 0v-1"></path>
                 <line x1="12" y1="19" x2="12" y2="22"></line>
             </svg>
-            <h1>Gemini Live Voice Studio</h1>
+            <h1>Ustad Live Voice Studio</h1>
         </div>
         <div class="header-actions">
             <span id="connectionBadge" class="badge disconnected">Disconnected</span>
@@ -37,23 +37,23 @@
                     <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
                     <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                 </svg>
-                1. Shared Gemini Configuration
+                1. Shared Ustad Configuration
             </h3>
 
             <p class="card-note">
                 A single configuration drives both workflows — <strong>Text to Speech</strong> and
-                <strong>Live Voice Query</strong> — because both run on the same Gemini 3.8 Live model.
+                <strong>Live Voice Query</strong> — because both run on the same shared Ustad voice engine.
             </p>
 
-            <label for="apiKey">Google Gemini API Key</label>
+            <label for="apiKey">Ustad API Key</label>
             <div class="row">
-                <input id="apiKey" type="password" placeholder="AIzaSy..." autocomplete="current-password">
+                <input id="apiKey" type="password" placeholder="Enter API Key..." autocomplete="current-password">
                 <button id="saveKey" class="secondary" style="width:auto;margin-top:0">Save</button>
             </div>
             <small class="hint">Stored in browser localStorage for convenience.</small>
 
             <label for="modelId">Model (Fixed & Shared)</label>
-            <input id="modelId" type="text" value="gemini-3.8-live" disabled style="opacity:0.85;cursor:not-allowed">
+            <input id="modelId" type="text" value="Ustad Live" disabled style="opacity:0.85;cursor:not-allowed">
             <small class="hint">Used identically by Text to Speech and Live Voice Query.</small>
 
             <label for="voiceName">Prebuilt Voice</label>
@@ -64,7 +64,7 @@
                 <button id="disconnectBtn" class="secondary danger" disabled>Disconnect</button>
             </div>
 
-            <div id="statusBox" class="status-box">Status: Ready to connect to Gemini 3.8 Live.</div>
+            <div id="statusBox" class="status-box">Status: Ready to connect to Ustad Live.</div>
 
             <div class="stats-grid">
                 <div class="stat-card">
@@ -82,69 +82,171 @@
             </div>
         </div>
 
-        <!-- Card 2: Workflow (Text to Speech / Live Voice Query) -->
+        <!-- Card 2: Workflow (Real-Time Voice Bot / Text to Speech / Live Voice Query) -->
         <div class="card">
             <div class="mode-switch" id="modeSwitch">
-                <button class="mode-tab active" data-mode="tts">🗣 Text to Speech</button>
+                <button class="mode-tab active" data-mode="voiceChat">🎙️ Real-Time Voice Bot</button>
+                <button class="mode-tab" data-mode="tts">🗣 Text to Speech</button>
                 <button class="mode-tab" data-mode="live">💬 Live Voice Query</button>
             </div>
 
-            <h3 id="modeCardTitle">2. Text to Speech</h3>
+            <h3 id="modeCardTitle">2. Real-Time Voice Bot (Voice-to-Voice)</h3>
 
-            <!-- Image Upload Section -->
-            <div class="image-upload-section" id="imageUploadSection" data-dropzone>
-                <input type="file" id="imageUploadInput" accept="image/*" style="display: none;">
-                <div class="drop-hint" id="dropHint">📋 Drop image here or click to upload</div>
-                <button id="imageUploadBtn" class="secondary"
-                    style="padding: 4px 8px; font-size: 12px; height: auto; line-height: 1;">
-                    📷 Upload Image
-                </button>
-                <div id="imagePreviewContainer" style="display: none; margin-top: 8px;">
-                    <img id="imagePreview"
-                        style="max-width: 100%; max-height: 150px; border-radius: 4px; border: 1px solid var(--border-color);">
-                    <br>
-                    <button id="removeImageBtn" class="secondary danger"
-                        style="padding: 2px 6px; font-size: 10px; height: auto;">Remove</button>
+            <!-- SECTION A: Real-Time Voice-to-Voice AI Chatbot Experience -->
+            <div id="voiceChatContainer" class="voice-chat-container">
+                <div class="voice-status-bar">
+                    <div class="voice-state-pill" id="voiceBotStateBadge">
+                        <span class="state-dot ready" id="stateDot"></span>
+                        <span id="voiceBotStateText">Ready to Converse</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <div class="sensitivity-wrapper" title="Adjust noise filter for your environment">
+                            <select id="micSensitivitySelect" class="secondary" style="width:auto;padding:3px 8px;font-size:11.5px;height:auto;margin:0;border-radius:4px">
+                                <option value="smart" selected>🛡️ Smart Noise Filter</option>
+                                <option value="noisy">🔇 High Filter (Noisy Room)</option>
+                                <option value="quiet">🎙️ Sensitive (Quiet Room)</option>
+                            </select>
+                        </div>
+                        <div class="audio-level-wrapper" title="Microphone Input Level">
+                            <span class="mic-icon">🎙️</span>
+                            <div class="audio-level-track">
+                                <div class="audio-level-fill" id="audioLevelFill"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Animated Reactive Voice Orb -->
+                <div class="voice-orb-wrapper" id="voiceOrbWrapper">
+                    <div class="voice-orb-halo" id="voiceOrbHalo"></div>
+                    <canvas id="voiceOrbCanvas" width="360" height="260"></canvas>
+                    <div class="voice-orb-overlay">
+                        <span id="voiceOrbSubtext" class="voice-orb-subtext">Click "Start Conversation" to begin</span>
+                    </div>
+                </div>
+
+                <!-- Minimal Voice Controls -->
+                <div class="voice-controls-bar">
+                    <button id="startVoiceChatBtn" class="primary-voice-btn">
+                        <span class="btn-icon">🎙️</span>
+                        <span id="startVoiceChatBtnText">Start Conversation</span>
+                    </button>
+                    <button id="muteMicBtn" class="secondary voice-control-btn" disabled title="Mute or Unmute Microphone">
+                        <span id="muteMicBtnIcon">🎤</span>
+                        <span id="muteMicBtnText">Mute</span>
+                    </button>
+                    <button id="interruptBtn" class="secondary danger voice-control-btn" disabled title="Instantly interrupt the AI">
+                        <span>🛑</span>
+                        <span>Interrupt</span>
+                    </button>
+                </div>
+
+                <!-- Live Captions & Dialogue Panel -->
+                <div class="captions-panel">
+                    <div class="captions-header">
+                        <span class="captions-title">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                            Live Captions & Dialogue
+                        </span>
+                        <div style="display:flex;gap:6px">
+                            <button id="clearDialogueBtn" class="secondary" style="padding:2px 8px;font-size:11px;height:auto;margin:0" title="Clear dialogue history">Clear</button>
+                        </div>
+                    </div>
+                    <div id="voiceDialogueBox" class="voice-dialogue-box">
+                        <div class="dialogue-placeholder" id="dialoguePlaceholder">
+                            💬 Your live conversation captions will stream here in real time. Speak naturally into your microphone!
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Topic Starter Chips for Voice -->
+                <div class="voice-preset-row">
+                    <small class="hint" style="margin-bottom:4px;display:block">💡 Try asking aloud:</small>
+                    <div class="preset-chips" id="voicePresetChips"></div>
                 </div>
             </div>
 
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <label for="textInput" id="promptLabel" style="margin-bottom: 0;">Text to Read Aloud</label>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                    <button id="micBtn" class="secondary"
-                        style="padding: 2px 8px; font-size: 14px; height: auto; line-height: 1; background: transparent; color: var(--accent-primary); border: 1px solid var(--accent-primary); border-radius: 4px;"
-                        title="Start/Stop microphone">🎙️</button>
-                    <button id="clearInputBtn" class="secondary"
-                        style="padding: 2px 8px; font-size: 14px; height: auto; line-height: 1; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: 4px;"
-                        title="Clear input">×</button>
+            <!-- SECTION B: Text / TTS / Image Workflow (Active in tts & live modes) -->
+            <div id="textWorkflowContainer" style="display:none">
+                <!-- Image Upload Section -->
+                <div class="image-upload-section" id="imageUploadSection" data-dropzone>
+                    <input type="file" id="imageUploadInput" accept="image/*" style="display: none;">
+                    <div class="drop-hint" id="dropHint">📋 Drop image here or click to upload</div>
+                    <button id="imageUploadBtn" class="secondary"
+                        style="padding: 4px 8px; font-size: 12px; height: auto; line-height: 1;">
+                        📷 Upload Image
+                    </button>
+                    <div id="imagePreviewContainer" style="display: none; margin-top: 8px;">
+                        <img id="imagePreview"
+                            style="max-width: 100%; max-height: 150px; border-radius: 4px; border: 1px solid var(--border-color);">
+                        <br>
+                        <button id="removeImageBtn" class="secondary danger"
+                            style="padding: 2px 6px; font-size: 10px; height: auto;">Remove</button>
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <label for="textInput" id="promptLabel" style="margin-bottom: 0;">Text to Read Aloud</label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button id="micBtn" class="secondary"
+                            style="padding: 2px 8px; font-size: 14px; height: auto; line-height: 1; background: transparent; color: var(--accent-primary); border: 1px solid var(--accent-primary); border-radius: 4px;"
+                            title="Start/Stop microphone">🎙️</button>
+                        <button id="clearInputBtn" class="secondary"
+                            style="padding: 2px 8px; font-size: 14px; height: auto; line-height: 1; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: 4px;"
+                            title="Clear input">×</button>
+                    </div>
+                </div>
+                <textarea id="textInput" placeholder="Type the text you want Ustad to read aloud..."></textarea>
+
+                <div class="preset-chips" id="presetChips"></div>
+
+                <div class="row" style="margin-top:16px">
+                    <button id="speakBtn" disabled>▶ Generate Speech</button>
+                </div>
+
+                <!-- Player Controls & Seek Bar -->
+                <div class="row" style="margin-top:10px">
+                    <button id="playAudioBtn" class="secondary" disabled>▶ Play</button>
+                    <button id="pauseAudioBtn" class="secondary" disabled>⏸ Pause</button>
+                    <button id="stopAudioBtn" class="secondary" disabled>⏹ Stop</button>
+                    <button id="downloadWavBtn" class="secondary" disabled>⬇ Download</button>
+                </div>
+
+                <div class="seek-container" id="seekContainer">
+                    <span id="currentTimeDisplay">0:00</span>
+                    <input id="seekSlider" type="range" value="0" min="0" max="100" step="0.1" disabled>
+                    <span id="totalDurationDisplay">0:00</span>
+                </div>
+
+                <canvas id="visualizer"></canvas>
+
+                <!-- Live Captions & Dialogue Panel for Live Voice Query Mode -->
+                <div class="captions-panel" id="liveQueryCaptionsPanel" style="margin-top:14px; display:none">
+                    <div class="captions-header">
+                        <span class="captions-title">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                            Live Captions & Dialogue
+                        </span>
+                        <div style="display:flex;gap:6px">
+                            <button id="clearLiveQueryDialogueBtn" class="secondary" style="padding:2px 8px;font-size:11px;height:auto;margin:0" title="Clear dialogue history">Clear</button>
+                        </div>
+                    </div>
+                    <div id="liveQueryDialogueBox" class="voice-dialogue-box">
+                        <div class="dialogue-placeholder" id="liveQueryPlaceholder">
+                            💬 Your query and Ustad's streamed live response captions will appear here in real time.
+                        </div>
+                    </div>
+                </div>
+
+                <div id="ttsTranscriptContainer">
+                    <label class="transcript-label">Model Transcript</label>
+                    <pre id="transcriptBox" class="transcript">—</pre>
                 </div>
             </div>
-            <textarea id="textInput" placeholder="Type the text you want Gemini to read aloud..."></textarea>
-
-            <div class="preset-chips" id="presetChips"></div>
-
-            <div class="row" style="margin-top:16px">
-                <button id="speakBtn" disabled>▶ Generate Speech</button>
-            </div>
-
-            <!-- Player Controls & Seek Bar -->
-            <div class="row" style="margin-top:10px">
-                <button id="playAudioBtn" class="secondary" disabled>▶ Play</button>
-                <button id="pauseAudioBtn" class="secondary" disabled>⏸ Pause</button>
-                <button id="stopAudioBtn" class="secondary" disabled>⏹ Stop</button>
-                <button id="downloadWavBtn" class="secondary" disabled>⬇ Download</button>
-            </div>
-
-            <div class="seek-container" id="seekContainer">
-                <span id="currentTimeDisplay">0:00</span>
-                <input id="seekSlider" type="range" value="0" min="0" max="100" step="0.1" disabled>
-                <span id="totalDurationDisplay">0:00</span>
-            </div>
-
-            <canvas id="visualizer"></canvas>
-
-            <label class="transcript-label">Model Transcript</label>
-            <pre id="transcriptBox" class="transcript">—</pre>
 
             <div id="resultBox" class="status-box" style="margin-top:14px">Waiting for session connection...</div>
         </div>
@@ -167,13 +269,13 @@
                 </div>
             </div>
             <pre
-                id="logs">[System initialized] Gemini Live Voice Studio v3.9.0 ready. Please enter your API Key and click Connect.</pre>
+                id="logs">[System initialized] Ustad Live Voice Studio v3.9.0 ready. Please enter your API Key and click Connect.</pre>
         </div>
     </main>
 
     <footer>
-        <p>Gemini Live Voice Studio Professional &bull; Shared Configuration for Text to Speech & Live Voice Query
-            &bull; Powered by Google Gemini API</p>
+        <p>Ustad Live Voice Studio Professional &bull; Shared Configuration for Text to Speech & Live Voice Query
+            &bull; Powered by Ustad AI Engine</p>
     </footer>
 
     <!-- Sleek Collapsible Sidebar for Generation Parameters -->
@@ -204,7 +306,7 @@
                     <span>2048 (Long)</span>
                 </div>
                 <small class="hint" style="margin-top:10px;display:block">
-                    Controls <code>maxOutputTokens</code> in Gemini's <code>generationConfig</code>. Speech output
+                    Controls <code>maxOutputTokens</code> in Ustad's <code>generationConfig</code>. Speech output
                     averages ~300–500 tokens per minute of audio.
                 </small>
             </div>

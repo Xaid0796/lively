@@ -72,7 +72,35 @@ const elements = {
     imageUploadBtn: $('imageUploadBtn'),
     imagePreviewContainer: $('imagePreviewContainer'),
     imagePreview: $('imagePreview'),
-    removeImageBtn: $('removeImageBtn')
+    removeImageBtn: $('removeImageBtn'),
+    /* Real-Time Voice Bot Elements */
+    voiceChatContainer: $('voiceChatContainer'),
+    textWorkflowContainer: $('textWorkflowContainer'),
+    voiceBotStateBadge: $('voiceBotStateBadge'),
+    voiceBotStateText: $('voiceBotStateText'),
+    stateDot: $('stateDot'),
+    audioLevelFill: $('audioLevelFill'),
+    voiceOrbWrapper: $('voiceOrbWrapper'),
+    voiceOrbHalo: $('voiceOrbHalo'),
+    voiceOrbCanvas: $('voiceOrbCanvas'),
+    voiceOrbSubtext: $('voiceOrbSubtext'),
+    startVoiceChatBtn: $('startVoiceChatBtn'),
+    startVoiceChatBtnText: $('startVoiceChatBtnText'),
+    muteMicBtn: $('muteMicBtn'),
+    muteMicBtnIcon: $('muteMicBtnIcon'),
+    muteMicBtnText: $('muteMicBtnText'),
+    interruptBtn: $('interruptBtn'),
+    voiceDialogueBox: $('voiceDialogueBox'),
+    dialoguePlaceholder: $('dialoguePlaceholder'),
+    clearDialogueBtn: $('clearDialogueBtn'),
+    voicePresetChips: $('voicePresetChips'),
+    micSensitivitySelect: $('micSensitivitySelect'),
+    /* Live Voice Query Captions Elements */
+    liveQueryCaptionsPanel: $('liveQueryCaptionsPanel'),
+    liveQueryDialogueBox: $('liveQueryDialogueBox'),
+    liveQueryPlaceholder: $('liveQueryPlaceholder'),
+    clearLiveQueryDialogueBtn: $('clearLiveQueryDialogueBtn'),
+    ttsTranscriptContainer: $('ttsTranscriptContainer')
 };
 
 /* ==========================================================================
@@ -116,6 +144,51 @@ const state = {
     mode: GEMINI_CONFIG.defaultMode,
     transcriptParts: [],
     turnComplete: false,
+    currentCaptionAbortController: null,
+
+    /* Real-Time Voice-to-Voice AI Chatbot state */
+    voiceChat: {
+        isActive: false,
+        isMuted: false,
+        pendingActivation: false,
+        botState: 'ready', // 'ready' | 'connecting' | 'listening' | 'user-speaking' | 'thinking' | 'ai-speaking' | 'interrupted' | 'muted' | 'disconnected'
+        micStream: null,
+        micAudioCtx: null,
+        micSource: null,
+        micProcessor: null,
+        micAnalyser: null,
+        micDataArray: null,
+        speechRecognition: null,
+        aiAudioScheduledEndTime: 0,
+        activeAiAudioNodes: [],
+        currentAiBubble: null,
+        currentAiText: '',
+        currentUserBubble: null,
+        currentUserText: '',
+        currentTurnUserText: '',
+        lastInterimText: '',
+        vadThreshold: GEMINI_CONFIG.voiceChatConfig?.vadThreshold || 0.05,
+        noiseFloor: 0.02,
+        sensitivityMode: 'smart',
+        consecutiveSpeechFrames: 0,
+        consecutiveSilenceFrames: 0,
+        hasSpokenInTurn: false,
+        lastCapturedSpeech: '',
+        lastVADTimestamp: 0,
+        interruptionDebounce: 0,
+        silenceTimer: null,
+        thinkingWatchdog: null,
+        isSpeechRecognitionSuppressed: false,
+        lastAiSpeechEndTime: 0,
+        suppressUserTranscriptionUntil: 0,
+        recentAiTexts: []
+    },
+
+    /* Live Voice Query Dialogue State */
+    liveQuery: {
+        currentAiBubble: null,
+        currentAiText: ''
+    },
 
     /* Image state */
     uploadedImage: null  // { dataURL: string, mimeType: string }
@@ -201,6 +274,11 @@ function applyModeControlVisibility() {
 function setMode(modeId) {
     if (!GEMINI_CONFIG.modes[modeId] || modeId === state.mode) return;
 
+    // If switching away from voiceChat while an active call is running, end call
+    if (state.mode === 'voiceChat' && state.voiceChat.isActive) {
+        endVoiceChat();
+    }
+
     state.mode = modeId;
     const mode = getActiveMode();
     localStorage.setItem(GEMINI_CONFIG.modeStorageKey, modeId);
@@ -213,11 +291,28 @@ function setMode(modeId) {
 
     applyModeControlVisibility();
 
-    // Show/hide image upload based on mode
-    if (state.mode === 'live') {
-        elements.imageUploadSection.style.display = 'block';
+    // Toggle Voice Chat view vs Text/Image workflow view
+    if (state.mode === 'voiceChat') {
+        if (elements.voiceChatContainer) elements.voiceChatContainer.style.display = 'flex';
+        if (elements.textWorkflowContainer) elements.textWorkflowContainer.style.display = 'none';
+        if (elements.resultBox) elements.resultBox.style.display = 'none';
+        renderVoicePresets(mode.presets);
     } else {
-        elements.imageUploadSection.style.display = 'none';
+        if (elements.voiceChatContainer) elements.voiceChatContainer.style.display = 'none';
+        if (elements.textWorkflowContainer) elements.textWorkflowContainer.style.display = 'block';
+        if (elements.resultBox) elements.resultBox.style.display = 'block';
+
+        // Show/hide image upload & Live Captions vs TTS Transcript based on mode
+        if (state.mode === 'live') {
+            if (elements.imageUploadSection) elements.imageUploadSection.style.display = 'block';
+            if (elements.liveQueryCaptionsPanel) elements.liveQueryCaptionsPanel.style.display = 'block';
+            if (elements.ttsTranscriptContainer) elements.ttsTranscriptContainer.style.display = 'none';
+        } else {
+            if (elements.imageUploadSection) elements.imageUploadSection.style.display = 'none';
+            if (elements.liveQueryCaptionsPanel) elements.liveQueryCaptionsPanel.style.display = 'none';
+            if (elements.ttsTranscriptContainer) elements.ttsTranscriptContainer.style.display = 'block';
+        }
+        renderPresets(mode.presets);
     }
 
     // Hide image preview and clear any uploaded image
@@ -229,11 +324,9 @@ function setMode(modeId) {
         tab.classList.toggle('active', tab.dataset.mode === state.mode);
     });
 
-    renderPresets(mode.presets);
-
     logMessage(`Workflow mode switched to: ${mode.label}`);
 
-    if (state.isConnected) {
+    if (state.isConnected && state.mode !== 'voiceChat') {
         // The system instruction travels with the handshake, so the session is
         // re-established automatically to apply the new mode's instruction.
         updateStatus(`Mode switched to ${mode.label}. Reconnecting to apply the new system instruction...`);
@@ -306,7 +399,7 @@ function loadPreferences() {
     const savedKey = localStorage.getItem(GEMINI_CONFIG.apiKeyStorageKey);
     if (savedKey) {
         elements.apiKey.value = savedKey;
-        logMessage('Loaded saved Gemini API key from localStorage.');
+        logMessage('Loaded saved Ustad API key from localStorage.');
     }
 
     const savedTheme = localStorage.getItem(GEMINI_CONFIG.themeStorageKey) || 'dark';
@@ -317,7 +410,7 @@ function loadPreferences() {
         state.mode = savedMode;
     }
 
-    elements.modelId.value = GEMINI_CONFIG.model;
+    elements.modelId.value = GEMINI_CONFIG.modelLabel || GEMINI_CONFIG.model;
 
     // Populate the voice roster from the shared configuration
     elements.voiceName.innerHTML = '';
@@ -333,16 +426,31 @@ function loadPreferences() {
     elements.modeCardTitle.textContent = mode.cardTitle;
     elements.promptLabel.textContent = mode.promptLabel;
     elements.textInput.placeholder = mode.placeholder;
-    elements.speakBtn.textContent = mode.buttonLabel;
-    renderPresets(mode.presets);
     applyModeControlVisibility();
 
-    // Show image upload section only in Live mode
-    if (state.mode === 'live') {
-        elements.imageUploadSection.style.display = 'block';
+    // Toggle Voice Chat view vs Text/Image workflow view
+    if (state.mode === 'voiceChat') {
+        if (elements.voiceChatContainer) elements.voiceChatContainer.style.display = 'flex';
+        if (elements.textWorkflowContainer) elements.textWorkflowContainer.style.display = 'none';
+        if (elements.resultBox) elements.resultBox.style.display = 'none';
+        renderVoicePresets(mode.presets);
     } else {
-        elements.imageUploadSection.style.display = 'none';
-        elements.imagePreviewContainer.style.display = 'none';
+        if (elements.voiceChatContainer) elements.voiceChatContainer.style.display = 'none';
+        if (elements.textWorkflowContainer) elements.textWorkflowContainer.style.display = 'block';
+        if (elements.resultBox) elements.resultBox.style.display = 'block';
+
+        // Show image upload section and captions based on mode
+        if (state.mode === 'live') {
+            if (elements.imageUploadSection) elements.imageUploadSection.style.display = 'block';
+            if (elements.liveQueryCaptionsPanel) elements.liveQueryCaptionsPanel.style.display = 'block';
+            if (elements.ttsTranscriptContainer) elements.ttsTranscriptContainer.style.display = 'none';
+        } else {
+            if (elements.imageUploadSection) elements.imageUploadSection.style.display = 'none';
+            if (elements.imagePreviewContainer) elements.imagePreviewContainer.style.display = 'none';
+            if (elements.liveQueryCaptionsPanel) elements.liveQueryCaptionsPanel.style.display = 'none';
+            if (elements.ttsTranscriptContainer) elements.ttsTranscriptContainer.style.display = 'block';
+        }
+        renderPresets(mode.presets);
     }
 
     document.querySelectorAll('.mode-tab').forEach((tab) => {
@@ -511,20 +619,52 @@ elements.imageUploadSection?.addEventListener('drop', (e) => {
 });
 
 /* --- Paste (Ctrl+V) Support --- */
-document.addEventListener('paste', (e) => {
+document.addEventListener('paste', async (e) => {
     // Only handle paste when the image upload section is visible (live mode)
-    if (elements.imageUploadSection?.style.display === 'none') return;
+    const isImageSectionVisible = elements.imageUploadSection?.style.display !== 'none' &&
+        elements.imageUploadSection?.style.display !== '';
+    if (!isImageSectionVisible) {
+        return;
+    }
 
-    const items = e.clipboardData?.items;
+    const clipboard = e.clipboardData || window.clipboardData;
+    if (!clipboard) {
+        logMessage('Clipboard API not available', true);
+        return;
+    }
+
+    const items = clipboard.items;
     if (!items) return;
 
+    let foundImage = false;
+
+    // Log clipboard item types for debugging (visible in console)
+    for (const item of items) {
+        if (item.type.startsWith('image/')) {
+            foundImage = true;
+            logMessage(`Pasted image detected: ${item.type}`);
+        }
+    }
+
+    if (!foundImage) {
+        logMessage('No image found in clipboard items');
+        return;
+    }
+
+    // Find the first image item
     for (const item of items) {
         if (item.type.startsWith('image/')) {
             e.preventDefault();
-            const file = item.getAsFile();
-            if (file) {
-                handleImageFile(file);
-                logMessage('Image pasted from clipboard.');
+            try {
+                const file = item.getAsFile();
+                if (file) {
+                    handleImageFile(file);
+                    logMessage('Image pasted from clipboard successfully.');
+                } else {
+                    logMessage('Failed to convert clipboard item to file', true);
+                }
+            } catch (error) {
+                logMessage(`Error processing image paste: ${error.message}`, true);
             }
             break;
         }
@@ -597,7 +737,7 @@ function ensureAudioContext() {
 function connectSession() {
     const apiKey = elements.apiKey.value.trim();
     if (!apiKey) {
-        alert('Please enter your Google Gemini API Key.');
+        alert('Please enter your Ustad API Key.');
         elements.apiKey.focus();
         return;
     }
@@ -638,7 +778,7 @@ function connectSession() {
         state.activeApiVersion = version;
         const url = buildLiveEndpoint(version, apiKey);
 
-        logMessage(`Connecting to Gemini Live (${GEMINI_CONFIG.model})...`, {
+        logMessage(`Connecting to Ustad Live (${GEMINI_CONFIG.modelLabel || GEMINI_CONFIG.model})...`, {
             endpoint: url.replace(/key=.*/, 'key=***'),
             mode: getActiveMode().label
         });
@@ -685,9 +825,14 @@ function connectSession() {
 
                     const latency = Math.round(performance.now() - state.connectionStartTime);
                     elements.statLatency.textContent = `${latency}ms`;
-                    updateStatus(`Connected successfully (${GEMINI_CONFIG.model})`);
+                    updateStatus(`Connected successfully (${GEMINI_CONFIG.modelLabel || GEMINI_CONFIG.model})`);
                     elements.resultBox.textContent = 'Session active. ' + getActiveMode().idleHint;
                     logMessage('Setup complete confirmed by server.');
+
+                    if (state.mode === 'voiceChat' && state.voiceChat.pendingActivation) {
+                        state.voiceChat.pendingActivation = false;
+                        onVoiceChatConnected();
+                    }
                     return;
                 }
 
@@ -706,6 +851,10 @@ function connectSession() {
         socket.onclose = (event) => {
             if (currentSession !== state.sessionCounter) return;
             clearSessionTimeout();
+
+            if (state.voiceChat.isActive) {
+                endVoiceChat();
+            }
 
             if (setupCompleteReceived) {
                 setConnectionState(false);
@@ -789,9 +938,14 @@ function handleConnectionFailure(currentSession, reason) {
                         setConnectionState(true);
                         const latency = Math.round(performance.now() - state.connectionStartTime);
                         elements.statLatency.textContent = `${latency}ms`;
-                        updateStatus(`Connected successfully (${GEMINI_CONFIG.model})`);
+                        updateStatus(`Connected successfully (${GEMINI_CONFIG.modelLabel || GEMINI_CONFIG.model})`);
                         elements.resultBox.textContent = 'Session active. ' + getActiveMode().idleHint;
                         logMessage('Setup complete confirmed by server.');
+
+                        if (state.mode === 'voiceChat' && state.voiceChat.pendingActivation) {
+                            state.voiceChat.pendingActivation = false;
+                            onVoiceChatConnected();
+                        }
                         return;
                     }
                     handleServerMessage(message);
@@ -808,6 +962,11 @@ function handleConnectionFailure(currentSession, reason) {
             socket.onclose = (event) => {
                 if (currentSession !== state.sessionCounter) return;
                 clearSessionTimeout();
+
+                if (state.voiceChat.isActive) {
+                    endVoiceChat();
+                }
+
                 if (setupCompleteReceived) {
                     setConnectionState(false);
                     state.isGenerating = false;
@@ -828,19 +987,58 @@ function handleServerMessage(message) {
     const serverContent = message.serverContent;
 
     if (serverContent) {
+        // --- Input (User) Audio Transcription ---
+        // Fired when inputAudioTranscription is enabled in setup.
+        // Routes to the correct dialogue panel per mode.
+        const inputText = serverContent.inputTranscription?.text;
+        if (inputText) {
+            logMessage(`Input transcript: ${inputText}`);
+            if (state.mode === 'voiceChat') {
+                appendUserDialogue(inputText, true);
+            }
+            // (Live Voice Query mode uses typed text via speakBtn, not mic transcription)
+        }
+
+        // --- Output (Model) Audio Transcription ---
+        // Fired when outputAudioTranscription is enabled in setup.
+        // This is the text version of what Gemini just spoke — used for Live Captions.
+        const outputText = serverContent.outputTranscription?.text;
+        if (outputText) {
+            logMessage(`Output transcript: ${outputText}`);
+            if (state.mode === 'voiceChat') {
+                appendAiDialogue(outputText);
+            } else if (state.mode === 'live') {
+                appendLiveQueryAiDialogue(outputText);
+            }
+            appendTranscript(outputText);
+        }
+
         const parts = serverContent.modelTurn?.parts || [];
 
         for (const part of parts) {
             if (part.text) {
-                logMessage(`Model text: ${part.text}`);
-                appendTranscript(part.text);
+                // modelTurn text parts (non-audio transcription paths, e.g. text-only responses)
+                logMessage(`Model text part: ${part.text}`);
+                if (!outputText) {
+                    // Only append if we haven't already shown an outputTranscription for this turn
+                    if (state.mode === 'voiceChat') {
+                        appendAiDialogue(part.text);
+                    } else if (state.mode === 'live') {
+                        appendLiveQueryAiDialogue(part.text);
+                    }
+                    appendTranscript(part.text);
+                }
             }
             if (part.inlineData?.data) {
                 state.chunkCount++;
                 elements.statChunks.textContent = state.chunkCount;
                 logMessage(`Received audio chunk #${state.chunkCount} (${part.inlineData.mimeType || 'audio/pcm'})`);
                 try {
-                    processPCMChunk(part.inlineData.data);
+                    if (state.mode === 'voiceChat') {
+                        processVoiceChatAudioChunk(part.inlineData.data);
+                    } else {
+                        processPCMChunk(part.inlineData.data);
+                    }
                 } catch (audioErr) {
                     logMessage(`Audio processing error: ${audioErr.message}`);
                 }
@@ -852,7 +1050,18 @@ function handleServerMessage(message) {
             state.turnComplete = true;
             elements.speakBtn.disabled = !state.isConnected;
 
-            if (isStreamingMode()) {
+            if (state.mode === 'voiceChat') {
+                logMessage('Voice turn complete.');
+                if (state.voiceChat.activeAiAudioNodes.length === 0) {
+                    setVoiceBotState('listening');
+                    state.voiceChat.currentAiBubble = null;
+                }
+            } else if (state.mode === 'live') {
+                state.liveQuery.currentAiBubble = null;
+                state.liveQuery.currentAiText = '';
+                elements.resultBox.textContent = 'Response complete. Audio streamed live.';
+                logMessage('Response turn complete (streamed live).');
+            } else if (isStreamingMode()) {
                 // The audio was already played while it streamed in, so the turn
                 // simply ends once the last chunk has been scheduled.
                 elements.resultBox.textContent = 'Response complete. Audio streamed live.';
@@ -871,11 +1080,22 @@ function handleServerMessage(message) {
         }
 
         if (serverContent.interrupted) {
-            stopAudioPlayback();
-            if (isStreamingMode()) {
-                state.recordedAudioBuffers = [];
-                state.masterAudioBuffer = null;
-                elements.currentTimeDisplay.textContent = '0:00';
+            if (state.mode === 'voiceChat') {
+                // In voiceChat mode, server-side interruptions are ignored.
+                // The AI response must ONLY be interrupted by the user pressing the Interrupt button.
+                // Ignoring server 'interrupted' events prevents false stops from echo / ambient noise.
+                logMessage('Server sent interrupted signal — ignored (button-only interruption mode).');
+            } else {
+                stopAudioPlayback();
+                if (state.mode === 'live') {
+                    state.liveQuery.currentAiBubble = null;
+                    state.liveQuery.currentAiText = '';
+                }
+                if (isStreamingMode()) {
+                    state.recordedAudioBuffers = [];
+                    state.masterAudioBuffer = null;
+                    elements.currentTimeDisplay.textContent = '0:00';
+                }
             }
             logMessage('Response interrupted.');
         }
@@ -883,6 +1103,9 @@ function handleServerMessage(message) {
 
     if (message.goAway) {
         logMessage('Server requested session closure.', message.goAway);
+        if (state.mode === 'voiceChat' && state.voiceChat.isActive) {
+            endVoiceChat();
+        }
     }
 }
 
@@ -895,6 +1118,9 @@ function appendTranscript(text) {
 elements.connectBtn.onclick = connectSession;
 
 elements.disconnectBtn.onclick = () => {
+    if (state.mode === 'voiceChat' && state.voiceChat.isActive) {
+        endVoiceChat();
+    }
     clearSessionTimeout();
     state.sessionCounter++;
     const socket = state.ws;
@@ -947,7 +1173,7 @@ elements.speakBtn.onclick = () => {
     elements.speakBtn.disabled = true;
     elements.resultBox.textContent = getActiveMode().id === 'tts'
         ? 'Generating speech...'
-        : 'Sending query to Gemini Live...';
+        : 'Sending query to Ustad Live...';
 
     const infoMsg = state.uploadedImage
         ? `Sending request (${state.uploadedImage.dataURL.length} chars base64 image + ${text.length} chars text)`
@@ -955,6 +1181,11 @@ elements.speakBtn.onclick = () => {
     logMessage(`Sending request in "${getActiveMode().label}" mode.${state.uploadedImage ? ' [Image attached]' : ''}`);
 
     try {
+        if (state.mode === 'live' && text) {
+            appendLiveQueryUserDialogue(text);
+            // Stream real-time AI response captions in the Live Captions panel
+            fetchAndStreamAiCaptions(text, 'live');
+        }
         state.ws.send(JSON.stringify(buildPromptPayload(text)));
         logMessage('Payload sent successfully.');
     } catch (err) {
@@ -1425,7 +1656,7 @@ elements.downloadWavBtn.onclick = () => {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `gemini-live-${state.mode}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.wav`;
+        link.download = `ustad-live-${state.mode}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.wav`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -1566,7 +1797,7 @@ function initSpeechRecognition() {
         if (interimTranscript) {
             elements.textInput.placeholder = interimTranscript + '...';
         } else {
-            elements.textInput.placeholder = 'Type the text you want Gemini to read aloud...';
+            elements.textInput.placeholder = 'Type the text you want Ustad to read aloud...';
         }
     };
 
@@ -1605,7 +1836,7 @@ function initSpeechRecognition() {
         }
 
         logMessage(errorMsg, true);
-        elements.textInput.placeholder = 'Type the text you want Gemini to read aloud...';
+        elements.textInput.placeholder = 'Type the text you want Ustad to read aloud...';
     };
 
     logMessage('Speech recognition initialized.');
@@ -1635,13 +1866,1260 @@ elements.exportLogs.onclick = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `gemini-live-logs-${new Date().toISOString().slice(0, 10)}.txt`;
+    link.download = `ustad-live-logs-${new Date().toISOString().slice(0, 10)}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     logMessage('Exported diagnostics logs to text file.');
 };
+
+/* ==========================================================================
+   Real-Time Voice-to-Voice AI Chatbot Engine
+   ========================================================================== */
+
+/**
+ * High-quality linear interpolation resampler to convert microphone audio (typically 44.1kHz or 48kHz)
+ * down to 16,000Hz (the format required by Gemini Multimodal Live API).
+ */
+function downsampleBuffer(buffer, sampleRate, outSampleRate) {
+    if (outSampleRate === sampleRate) {
+        return buffer;
+    }
+    if (outSampleRate > sampleRate) {
+        return buffer;
+    }
+    const sampleRateRatio = sampleRate / outSampleRate;
+    const newLength = Math.round(buffer.length / sampleRateRatio);
+    const result = new Float32Array(newLength);
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+    while (offsetResult < result.length) {
+        const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+        let accum = 0;
+        let count = 0;
+        for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+            accum += buffer[i];
+            count++;
+        }
+        result[offsetResult] = count > 0 ? accum / count : 0;
+        offsetResult++;
+        offsetBuffer = nextOffsetBuffer;
+    }
+    return result;
+}
+
+/**
+ * Converts Float32 audio samples [-1.0, 1.0] to 16-bit signed PCM integers (Int16Array).
+ */
+function floatTo16BitPCM(float32Array) {
+    const buffer = new Int16Array(float32Array.length);
+    for (let i = 0; i < float32Array.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32Array[i]));
+        buffer[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return buffer;
+}
+
+/**
+ * Converts ArrayBuffer / Int16Array into a Base64 string safely without stack overflows.
+ */
+function arrayBufferToBase64(buffer) {
+    let binary = '';
+    const bytes = new Uint8Array(buffer.buffer ? buffer.buffer : buffer);
+    const len = bytes.byteLength;
+    const chunkSize = 8192;
+    for (let i = 0; i < len; i += chunkSize) {
+        const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+        binary += String.fromCharCode.apply(null, chunk);
+    }
+    return btoa(binary);
+}
+
+/**
+ * Updates conversational state for the Real-Time Voice Bot.
+ * Manages indicator dot, text label, subtext hint, and button enable states.
+ */
+function setVoiceBotState(newState) {
+    state.voiceChat.botState = newState;
+
+    if (elements.stateDot) {
+        elements.stateDot.className = `state-dot ${newState}`;
+    }
+
+    let label = 'Ready to Converse';
+    let subtext = 'Click "Start Conversation" to begin';
+
+    switch (newState) {
+        case 'connecting':
+            label = 'Connecting to Ustad Live...';
+            subtext = 'Establishing bidirectional audio stream...';
+            break;
+        case 'listening':
+            label = 'Listening (Speak naturally...)';
+            subtext = 'Listening... Speak in any language anytime';
+            break;
+        case 'user-speaking':
+            label = 'Hearing You...';
+            subtext = 'Streaming microphone input...';
+            break;
+        case 'thinking':
+            label = 'Thinking...';
+            subtext = 'Ustad is formulating response...';
+            break;
+        case 'ai-speaking':
+            label = 'AI Speaking...';
+            subtext = 'Speaking live — talk anytime to interrupt';
+            break;
+        case 'interrupted':
+            label = 'Interrupted';
+            subtext = 'AI paused immediately — listening to you...';
+            break;
+        case 'muted':
+            label = 'Microphone Muted';
+            subtext = 'Microphone is muted — click Unmute to talk';
+            break;
+        case 'disconnected':
+            label = 'Disconnected';
+            subtext = 'Session ended. Click "Start Conversation" to restart';
+            break;
+        case 'ready':
+            label = 'Ready to Converse';
+            subtext = 'Click "Start Conversation" to begin';
+            break;
+    }
+
+    if (elements.voiceBotStateText) elements.voiceBotStateText.textContent = label;
+    if (elements.voiceOrbSubtext) elements.voiceOrbSubtext.textContent = subtext;
+
+    if (elements.interruptBtn) {
+        elements.interruptBtn.disabled = !state.voiceChat.isActive || newState !== 'ai-speaking';
+    }
+}
+
+/**
+ * Initializes the procedural reactive Voice Orb canvas.
+ * Renders dynamic fluid particles and concentric frequency rings that morph
+ * based on whether the user is speaking or Gemini AI is responding.
+ */
+function initVoiceOrb() {
+    const canvas = elements.voiceOrbCanvas;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    function resizeOrb() {
+        if (!canvas.parentElement) return;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * (window.devicePixelRatio || 1);
+        canvas.height = rect.height * (window.devicePixelRatio || 1);
+    }
+    resizeOrb();
+    window.addEventListener('resize', resizeOrb);
+
+    const freqData = new Uint8Array(64);
+    let rotation = 0;
+    let waveOffset = 0;
+
+    function renderOrb() {
+        requestAnimationFrame(renderOrb);
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        const cx = w / 2;
+        const cy = h / 2;
+        const baseRadius = Math.min(w, h) * 0.22;
+        const botState = state.voiceChat.botState;
+
+        // Get live audio energy depending on active speaker
+        let audioEnergy = 0;
+        if (botState === 'ai-speaking' && state.analyser) {
+            state.analyser.getByteFrequencyData(freqData);
+            let sum = 0;
+            for (let i = 0; i < 32; i++) sum += freqData[i];
+            audioEnergy = (sum / 32) / 255;
+        } else if (botState === 'user-speaking' && state.voiceChat.micAnalyser) {
+            state.voiceChat.micAnalyser.getByteFrequencyData(freqData);
+            let sum = 0;
+            for (let i = 0; i < 32; i++) sum += freqData[i];
+            audioEnergy = (sum / 32) / 255;
+        }
+
+        // Color palettes per state
+        let colorA, colorB, haloColor;
+        switch (botState) {
+            case 'listening':
+                colorA = '#06b6d4';
+                colorB = '#3b82f6';
+                haloColor = 'rgba(6, 182, 212, 0.45)';
+                break;
+            case 'user-speaking':
+                colorA = '#10b981';
+                colorB = '#06b6d4';
+                haloColor = 'rgba(16, 185, 129, 0.6)';
+                break;
+            case 'thinking':
+                colorA = '#8b5cf6';
+                colorB = '#ec4899';
+                haloColor = 'rgba(139, 92, 246, 0.6)';
+                break;
+            case 'ai-speaking':
+                colorA = '#ec4899';
+                colorB = '#8b5cf6';
+                haloColor = 'rgba(236, 72, 153, 0.65)';
+                break;
+            case 'interrupted':
+                colorA = '#f97316';
+                colorB = '#ef4444';
+                haloColor = 'rgba(249, 115, 22, 0.6)';
+                break;
+            case 'muted':
+                colorA = '#ef4444';
+                colorB = '#7f1d1d';
+                haloColor = 'rgba(239, 68, 68, 0.35)';
+                break;
+            case 'connecting':
+                colorA = '#f59e0b';
+                colorB = '#6366f1';
+                haloColor = 'rgba(245, 158, 11, 0.45)';
+                break;
+            default: // ready / disconnected
+                colorA = '#475569';
+                colorB = '#6366f1';
+                haloColor = 'rgba(99, 102, 241, 0.25)';
+        }
+
+        // Update CSS backdrop halo glow
+        if (elements.voiceOrbHalo) {
+            elements.voiceOrbHalo.style.background = `radial-gradient(circle, ${haloColor} 0%, transparent 70%)`;
+        }
+
+        rotation += (botState === 'thinking' ? 0.045 : 0.012);
+        waveOffset += (0.03 + audioEnergy * 0.12);
+
+        // Draw layered concentric fluid waveform rings
+        const numRings = 3;
+        for (let ring = numRings; ring >= 1; ring--) {
+            const ringScale = 1 + (ring - 1) * 0.22 + audioEnergy * 0.35;
+            const points = 48;
+            ctx.beginPath();
+            for (let i = 0; i <= points; i++) {
+                const angle = (i / points) * Math.PI * 2 + rotation * (ring % 2 === 0 ? 1 : -1);
+                const freqIndex = Math.floor((i / points) * 32);
+                const freqVal = (freqData[freqIndex] || 0) / 255;
+                const wave = Math.sin(angle * 4 + waveOffset * (ring + 1)) * (8 * ringScale);
+                const r = (baseRadius * ringScale) + (wave * (0.4 + audioEnergy * 1.6)) + (freqVal * 22 * audioEnergy);
+                const x = cx + Math.cos(angle) * r;
+                const y = cy + Math.sin(angle) * r;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+
+            ctx.strokeStyle = colorA;
+            ctx.lineWidth = 2 * (window.devicePixelRatio || 1);
+            ctx.shadowBlur = 15 * (window.devicePixelRatio || 1);
+            ctx.shadowColor = colorA;
+            ctx.stroke();
+        }
+
+        // Draw glowing inner core orb
+        ctx.beginPath();
+        const coreRadius = baseRadius * (0.85 + Math.sin(waveOffset * 1.5) * 0.05 + audioEnergy * 0.22);
+        ctx.arc(cx, cy, coreRadius, 0, Math.PI * 2);
+        const grad = ctx.createRadialGradient(
+            cx - coreRadius * 0.25,
+            cy - coreRadius * 0.25,
+            coreRadius * 0.1,
+            cx,
+            cy,
+            coreRadius
+        );
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.35, colorA);
+        grad.addColorStop(0.85, colorB);
+        grad.addColorStop(1, 'rgba(0,0,0,0.6)');
+        ctx.fillStyle = grad;
+        ctx.shadowBlur = (25 + audioEnergy * 35) * (window.devicePixelRatio || 1);
+        ctx.shadowColor = colorA;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+    }
+
+    renderOrb();
+}
+
+/**
+ * Initializes microphone audio capture and 16kHz PCM streaming pipeline.
+ */
+async function initVoiceChatMicrophone() {
+    ensureAudioContext();
+
+    if (!state.voiceChat.micStream) {
+        state.voiceChat.micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                channelCount: 1,
+                sampleRate: 16000,
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+            }
+        });
+    }
+
+    state.voiceChat.micAudioCtx = state.audioCtx;
+    state.voiceChat.micSource = state.audioCtx.createMediaStreamSource(state.voiceChat.micStream);
+
+    state.voiceChat.micAnalyser = state.audioCtx.createAnalyser();
+    state.voiceChat.micAnalyser.fftSize = 128;
+    state.voiceChat.micDataArray = new Uint8Array(state.voiceChat.micAnalyser.frequencyBinCount);
+
+    state.voiceChat.micSource.connect(state.voiceChat.micAnalyser);
+
+    const bufferSize = 2048;
+    const processor = state.audioCtx.createScriptProcessor(bufferSize, 1, 1);
+    state.voiceChat.micProcessor = processor;
+
+    state.voiceChat.micAnalyser.connect(processor);
+
+    // Silent gain connection to keep the processor active
+    const silentGain = state.audioCtx.createGain();
+    silentGain.gain.value = 0;
+    processor.connect(silentGain);
+    silentGain.connect(state.audioCtx.destination);
+
+    processor.onaudioprocess = (e) => {
+        if (!state.voiceChat.isActive || state.voiceChat.isMuted) {
+            if (elements.audioLevelFill) elements.audioLevelFill.style.width = '0%';
+            return;
+        }
+
+        const inputData = e.inputBuffer.getChannelData(0);
+
+        // Compute RMS audio level
+        let sum = 0;
+        for (let i = 0; i < inputData.length; i++) {
+            sum += inputData[i] * inputData[i];
+        }
+        const rms = Math.sqrt(sum / inputData.length);
+
+        if (elements.audioLevelFill) {
+            elements.audioLevelFill.style.width = Math.min(100, Math.round(rms * 450)) + '%';
+        }
+
+        const now = performance.now();
+        const isAiSpeaking = state.voiceChat.botState === 'ai-speaking' ||
+            state.voiceChat.activeAiAudioNodes.length > 0 ||
+            (state.audioCtx && state.voiceChat.aiAudioScheduledEndTime > state.audioCtx.currentTime);
+        const isThinking = state.voiceChat.botState === 'thinking';
+        const inEchoTail = (now < state.voiceChat.suppressUserTranscriptionUntil) ||
+            (now - state.voiceChat.lastAiSpeechEndTime < 600);
+
+        // === RULE: When AI is speaking, thinking, or in acoustic echo tail, mic stream is blocked ===
+        // Prevents speaker audio feedback loop and false speech triggers
+        if (isAiSpeaking || isThinking || inEchoTail) {
+            state.voiceChat.consecutiveSpeechFrames = 0;
+            // Still show mic level so UI doesn't look frozen
+            return;
+        }
+
+        // Adaptive Sensitivity & Noise Filtering
+        let baseThreshold = 0.052; // 'smart' default
+        if (state.voiceChat.sensitivityMode === 'noisy') {
+            baseThreshold = 0.078;
+        } else if (state.voiceChat.sensitivityMode === 'quiet') {
+            baseThreshold = 0.035;
+        }
+
+        // Calibrate ambient background noise floor during quiet moments
+        if (rms < baseThreshold) {
+            state.voiceChat.noiseFloor = state.voiceChat.noiseFloor * 0.96 + rms * 0.04;
+        }
+
+        // Dynamic threshold: never lower than base, and always above room noise floor
+        const effectiveThreshold = Math.max(baseThreshold, state.voiceChat.noiseFloor * 1.85);
+
+        // Check if current frame exceeds threshold
+        const isFrameAboveThreshold = rms > effectiveThreshold;
+
+        if (isFrameAboveThreshold) {
+            state.voiceChat.consecutiveSpeechFrames++;
+            state.voiceChat.consecutiveSilenceFrames = 0;
+        } else {
+            state.voiceChat.consecutiveSilenceFrames++;
+            state.voiceChat.consecutiveSpeechFrames = 0;
+        }
+
+        // SPEECH START: Require at least 3 consecutive frames (~140ms) of sustained audio to declare speech.
+        // This eliminates clicks, breathing pops, keyboard clatter, and ambient room spikes.
+        if (state.voiceChat.consecutiveSpeechFrames >= 3) {
+            state.voiceChat.lastVADTimestamp = now;
+            state.voiceChat.hasSpokenInTurn = true;
+
+            if (state.voiceChat.botState !== 'user-speaking' && state.voiceChat.botState !== 'interrupted') {
+                setVoiceBotState('user-speaking');
+            }
+
+            if (state.voiceChat.silenceTimer) {
+                clearTimeout(state.voiceChat.silenceTimer);
+                state.voiceChat.silenceTimer = null;
+            }
+        }
+
+        // STREAM AUDIO: While user is speaking, downsample to 16kHz and send to Gemini Live
+        if (state.voiceChat.botState === 'user-speaking' && state.ws && state.ws.readyState === WebSocket.OPEN) {
+            const resampled = downsampleBuffer(inputData, e.inputBuffer.sampleRate, 16000);
+            const pcm16 = floatTo16BitPCM(resampled);
+            const base64Pcm = arrayBufferToBase64(pcm16);
+
+            try {
+                state.ws.send(JSON.stringify({
+                    realtimeInput: {
+                        mediaChunks: [{
+                            mimeType: 'audio/pcm;rate=16000',
+                            data: base64Pcm
+                        }]
+                    }
+                }));
+            } catch (err) {
+                logMessage(`Mic send error: ${err.message}`);
+            }
+        }
+
+        // SPEECH END / TURN COMPLETION:
+        // After user stops speaking, wait for 2 full seconds of silence before triggering response.
+        // ~7 consecutive silent frames (~320ms) to confirm speech has ended, then 2000ms timer.
+        if (state.voiceChat.botState === 'user-speaking' && state.voiceChat.hasSpokenInTurn) {
+            if (state.voiceChat.consecutiveSilenceFrames >= 7 && !state.voiceChat.silenceTimer) {
+                state.voiceChat.silenceTimer = setTimeout(() => {
+                    if (state.voiceChat.isActive && state.voiceChat.botState === 'user-speaking' && state.voiceChat.hasSpokenInTurn) {
+                        finishUserVoiceTurn();
+                    }
+                    state.voiceChat.silenceTimer = null;
+                }, 2000); // 2-second pause before model responds
+            }
+        }
+    };
+}
+
+/**
+ * Signals end of user voice turn after a 2-second silence.
+ * Dispatches the captured spoken query to Gemini Live so the model starts
+ * generating and speaking its response, and starts live caption streaming.
+ */
+function finishUserVoiceTurn() {
+    if (!state.voiceChat.isActive || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+
+    const userQuery = (
+        (state.voiceChat.currentTurnUserText || '') +
+        (state.voiceChat.lastInterimText ? ' ' + state.voiceChat.lastInterimText : '')
+    ).trim() || (state.voiceChat.currentUserBubble?.querySelector('.bubble-content')?.textContent || '').trim();
+
+    logMessage(`2-second silence confirmed. Initiating model response for: "${userQuery || '[Voice Query]'}"`);
+    setVoiceBotState('thinking');
+    state.voiceChat.isSpeechRecognitionSuppressed = true;
+    try {
+        state.voiceChat.speechRecognition?.abort();
+    } catch (_) {}
+    state.voiceChat.hasSpokenInTurn = false;
+    state.voiceChat.consecutiveSpeechFrames = 0;
+    state.voiceChat.consecutiveSilenceFrames = 0;
+    state.voiceChat.currentTurnUserText = '';
+    state.voiceChat.lastInterimText = '';
+    state.voiceChat.currentUserBubble = null;
+
+    try {
+        if (userQuery) {
+            // Send clientContent turn containing the user's query text with turnComplete: true.
+            // This triggers Gemini Live to generate its spoken audio response answering the query.
+            state.ws.send(JSON.stringify({
+                clientContent: {
+                    turns: [{
+                        role: 'user',
+                        parts: [{ text: userQuery }]
+                    }],
+                    turnComplete: true
+                }
+            }));
+            logMessage(`Dispatched spoken query to Ustad Live: "${userQuery}"`);
+        } else {
+            // Fallback if audio was streamed but SpeechRecognition text was not captured:
+            // Flush audio stream buffer with audioStreamEnd and send turnComplete prompt
+            try {
+                state.ws.send(JSON.stringify({
+                    realtimeInput: {
+                        audioStreamEnd: true
+                    }
+                }));
+            } catch (_) {}
+
+            state.ws.send(JSON.stringify({
+                clientContent: {
+                    turns: [{
+                        role: 'user',
+                        parts: [{ text: 'Please respond to my voice query.' }]
+                    }],
+                    turnComplete: true
+                }
+            }));
+            logMessage('Dispatched audioStreamEnd and voice turn prompt.');
+        }
+
+        // Stream text captions in real time for the AI response
+        fetchAndStreamAiCaptions(userQuery || 'Voice conversation response', 'voiceChat');
+
+    } catch (e) {
+        logMessage(`Turn completion dispatch error: ${e.message}`, true);
+    }
+
+    // Safety watchdog: ensure UI never stays stuck on 'thinking' if server stalls
+    if (state.voiceChat.thinkingWatchdog) clearTimeout(state.voiceChat.thinkingWatchdog);
+    state.voiceChat.thinkingWatchdog = setTimeout(() => {
+        if (state.voiceChat.isActive && state.voiceChat.botState === 'thinking') {
+            logMessage('Thinking watchdog: server took >10s, resetting to listening.');
+            state.voiceChat.isSpeechRecognitionSuppressed = false;
+            setVoiceBotState('listening');
+            try { state.voiceChat.speechRecognition?.start(); } catch (_) {}
+        }
+    }, 10000);
+}
+
+/**
+ * Detects whether incoming speech recognition text is a loopback echo of the
+ * model's own voice output (from room speakers picking up into the microphone).
+ */
+function isModelSpeechEcho(text) {
+    if (!text || !text.trim()) return false;
+    const normalize = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+    const candNorm = normalize(text);
+    if (!candNorm || candNorm.length < 3) return false;
+
+    const textsToCheck = [
+        state.voiceChat.currentAiText || '',
+        ...(state.voiceChat.recentAiTexts || [])
+    ];
+
+    for (const aiText of textsToCheck) {
+        const aiNorm = normalize(aiText);
+        if (!aiNorm) continue;
+
+        // Direct containment
+        if (aiNorm.includes(candNorm) || (candNorm.length > 8 && candNorm.includes(aiNorm))) {
+            return true;
+        }
+
+        // Substantial word overlap
+        const candWords = candNorm.split(' ').filter(w => w.length > 2);
+        if (candWords.length >= 2) {
+            const aiWords = new Set(aiNorm.split(' '));
+            let matchCount = 0;
+            for (const w of candWords) {
+                if (aiWords.has(w)) matchCount++;
+            }
+            if (matchCount / candWords.length >= 0.6) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Initializes continuous Web Speech API speech recognition for instant live captions of user speech.
+ */
+function initVoiceChatSpeechRecognition() {
+    const SpeechRecog = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecog) {
+        logMessage('Speech recognition not available for client-side live captions.');
+        return;
+    }
+
+    try {
+        const recognition = new SpeechRecog();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = navigator.language || 'en-US';
+
+        recognition.onresult = (event) => {
+            if (!state.voiceChat.isActive) return;
+
+            const now = performance.now();
+            const isAiSpeaking = state.voiceChat.botState === 'ai-speaking' ||
+                state.voiceChat.activeAiAudioNodes.length > 0 ||
+                (state.audioCtx && state.audioCtx.currentTime < state.voiceChat.aiAudioScheduledEndTime) ||
+                state.voiceChat.isSpeechRecognitionSuppressed;
+            const isThinking = state.voiceChat.botState === 'thinking';
+            const inEchoTail = (now < state.voiceChat.suppressUserTranscriptionUntil) ||
+                (now - state.voiceChat.lastAiSpeechEndTime < 650);
+
+            // === CRITICAL FIX: Suppress transcription when model is speaking, thinking, or in echo tail ===
+            if (isAiSpeaking || isThinking || inEchoTail) {
+                return;
+            }
+
+            let interim = '';
+            let final = '';
+
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    final += transcript;
+                } else {
+                    interim += transcript;
+                }
+            }
+
+            // Echo filter: verify the text does NOT match words spoken by the model
+            if (isModelSpeechEcho(final) || isModelSpeechEcho(interim)) {
+                logMessage('Echo filter dropped model voice output from user transcription.');
+                return;
+            }
+
+            if (final) {
+                state.voiceChat.currentTurnUserText = (
+                    (state.voiceChat.currentTurnUserText ? state.voiceChat.currentTurnUserText + ' ' : '') + final.trim()
+                ).trim();
+                state.voiceChat.lastInterimText = '';
+                appendUserDialogue(state.voiceChat.currentTurnUserText, true);
+            } else if (interim) {
+                state.voiceChat.lastInterimText = interim.trim();
+                const display = (
+                    (state.voiceChat.currentTurnUserText ? state.voiceChat.currentTurnUserText + ' ' : '') + interim.trim()
+                ).trim();
+                appendUserDialogue(display, false);
+            }
+        };
+
+        recognition.onerror = (e) => {
+            if (e.error !== 'no-speech') {
+                logMessage(`Live captions recognition event: ${e.error}`);
+            }
+        };
+
+        recognition.onend = () => {
+            if (state.voiceChat.isActive && !state.voiceChat.isMuted && !state.voiceChat.isSpeechRecognitionSuppressed) {
+                try { recognition.start(); } catch (_) {}
+            }
+        };
+
+        state.voiceChat.speechRecognition = recognition;
+        recognition.start();
+        logMessage('Live captions speech recognition active.');
+    } catch (e) {
+        logMessage(`Speech recognition init notice: ${e.message}`);
+    }
+}
+
+/**
+ * Schedules gapless playback for AI voice chunks streaming in from Gemini Live (24kHz 16-bit PCM).
+ */
+function processVoiceChatAudioChunk(base64Data) {
+    if (!state.audioCtx) return;
+
+    const rawBinary = atob(base64Data);
+    const sampleCount = Math.floor(rawBinary.length / 2);
+    if (!sampleCount) return;
+
+    const audioBuffer = state.audioCtx.createBuffer(1, sampleCount, GEMINI_CONFIG.sampleRate);
+    const channelData = audioBuffer.getChannelData(0);
+
+    for (let i = 0; i < sampleCount; i++) {
+        let sample = rawBinary.charCodeAt(i * 2) | (rawBinary.charCodeAt(i * 2 + 1) << 8);
+        if (sample >= 32768) sample -= 65536;
+        channelData[i] = sample / 32768;
+    }
+
+    if (state.audioCtx.state === 'suspended') {
+        state.audioCtx.resume();
+    }
+
+    const sourceNode = state.audioCtx.createBufferSource();
+    sourceNode.buffer = audioBuffer;
+    sourceNode.connect(state.analyser); // Analyser connects to destination
+
+    const now = state.audioCtx.currentTime;
+    const startAt = Math.max(now, state.voiceChat.aiAudioScheduledEndTime);
+
+    sourceNode.start(startAt);
+    state.voiceChat.aiAudioScheduledEndTime = startAt + audioBuffer.duration;
+    state.voiceChat.activeAiAudioNodes.push(sourceNode);
+
+    // Suppress speech recognition while AI audio is playing to prevent speaker loopback
+    state.voiceChat.isSpeechRecognitionSuppressed = true;
+
+    // If we were waiting in thinking state, transition to AI speaking and clear watchdog
+    if (state.voiceChat.botState === 'thinking') {
+        if (state.voiceChat.thinkingWatchdog) {
+            clearTimeout(state.voiceChat.thinkingWatchdog);
+            state.voiceChat.thinkingWatchdog = null;
+        }
+    }
+    setVoiceBotState('ai-speaking');
+
+    sourceNode.onended = () => {
+        const idx = state.voiceChat.activeAiAudioNodes.indexOf(sourceNode);
+        if (idx !== -1) state.voiceChat.activeAiAudioNodes.splice(idx, 1);
+
+        if (state.voiceChat.activeAiAudioNodes.length === 0 && state.turnComplete) {
+            if (state.voiceChat.isActive && state.voiceChat.botState === 'ai-speaking') {
+                const nowPerf = performance.now();
+                state.voiceChat.lastAiSpeechEndTime = nowPerf;
+                // Add a 650ms acoustic echo settling window
+                state.voiceChat.suppressUserTranscriptionUntil = nowPerf + 650;
+
+                // Cache recent AI text for echo filtering
+                if (state.voiceChat.currentAiText) {
+                    state.voiceChat.recentAiTexts.push(state.voiceChat.currentAiText);
+                    if (state.voiceChat.recentAiTexts.length > 6) {
+                        state.voiceChat.recentAiTexts.shift();
+                    }
+                }
+
+                // Reset turn buffers to pristine state
+                state.voiceChat.currentTurnUserText = '';
+                state.voiceChat.lastInterimText = '';
+                state.voiceChat.currentUserBubble = null;
+                state.voiceChat.hasSpokenInTurn = false;
+                state.voiceChat.consecutiveSpeechFrames = 0;
+                state.voiceChat.consecutiveSilenceFrames = 0;
+
+                setVoiceBotState('listening');
+                state.voiceChat.currentAiBubble = null;
+
+                // Resume speech recognition listening after echo has decayed
+                setTimeout(() => {
+                    if (state.voiceChat.isActive && state.voiceChat.botState === 'listening') {
+                        state.voiceChat.isSpeechRecognitionSuppressed = false;
+                        try {
+                            state.voiceChat.speechRecognition?.start();
+                        } catch (_) {}
+                    }
+                }, 500);
+            }
+        }
+    };
+}
+
+/**
+ * Instantly halts and cuts off all scheduled and active AI audio nodes.
+ * Used for both server-driven barge-in (`serverContent.interrupted`) and user voice/click interruptions.
+ */
+function interruptAiSpeech(reason = 'Interrupted') {
+    if (state.voiceChat.activeAiAudioNodes.length > 0) {
+        logMessage(`AI Speech Interrupted: ${reason}`);
+    }
+
+    const now = performance.now();
+    state.voiceChat.lastAiSpeechEndTime = now;
+    state.voiceChat.suppressUserTranscriptionUntil = now + 400;
+
+    if (state.currentCaptionAbortController) {
+        try { state.currentCaptionAbortController.abort(); } catch (_) {}
+        state.currentCaptionAbortController = null;
+    }
+    if (state.voiceChat.thinkingWatchdog) {
+        clearTimeout(state.voiceChat.thinkingWatchdog);
+        state.voiceChat.thinkingWatchdog = null;
+    }
+
+    state.voiceChat.activeAiAudioNodes.forEach((node) => {
+        try { node.stop(); } catch (_) {}
+        try { node.disconnect(); } catch (_) {}
+    });
+    state.voiceChat.activeAiAudioNodes = [];
+
+    if (state.audioCtx) {
+        state.voiceChat.aiAudioScheduledEndTime = state.audioCtx.currentTime;
+    }
+
+    // Cache interrupted text for echo filter
+    if (state.voiceChat.currentAiText) {
+        state.voiceChat.recentAiTexts.push(state.voiceChat.currentAiText);
+        if (state.voiceChat.recentAiTexts.length > 6) state.voiceChat.recentAiTexts.shift();
+    }
+
+    // Reset turn buffers
+    state.voiceChat.currentTurnUserText = '';
+    state.voiceChat.lastInterimText = '';
+    state.voiceChat.currentUserBubble = null;
+    state.voiceChat.hasSpokenInTurn = false;
+    state.voiceChat.consecutiveSpeechFrames = 0;
+    state.voiceChat.consecutiveSilenceFrames = 0;
+
+    if (state.voiceChat.currentAiBubble) {
+        const content = state.voiceChat.currentAiBubble.querySelector('.bubble-content');
+        if (content && !content.classList.contains('interrupted')) {
+            content.classList.add('interrupted');
+            const tag = document.createElement('span');
+            tag.className = 'interrupted-tag';
+            tag.textContent = ' ⚡ [Interrupted]';
+            content.appendChild(tag);
+        }
+        state.voiceChat.currentAiBubble = null;
+    }
+
+    setVoiceBotState('interrupted');
+
+    setTimeout(() => {
+        if (state.voiceChat.isActive && state.voiceChat.botState === 'interrupted') {
+            state.voiceChat.isSpeechRecognitionSuppressed = false;
+            setVoiceBotState('listening');
+            try {
+                state.voiceChat.speechRecognition?.start();
+            } catch (_) {}
+        }
+    }, 350);
+}
+
+/**
+ * Appends or updates user speech in the live captions dialogue panel.
+ */
+function appendUserDialogue(text, isFinal = false) {
+    if (!text || !text.trim()) return;
+
+    if (elements.dialoguePlaceholder && elements.dialoguePlaceholder.style.display !== 'none') {
+        elements.dialoguePlaceholder.style.display = 'none';
+    }
+
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    if (!state.voiceChat.currentUserBubble) {
+        const bubble = document.createElement('div');
+        bubble.className = 'dialogue-bubble user';
+        bubble.innerHTML = `
+            <div class="bubble-meta"><span>You 👤</span> • <span>${time}</span></div>
+            <div class="bubble-content"></div>
+        `;
+        elements.voiceDialogueBox.appendChild(bubble);
+        state.voiceChat.currentUserBubble = bubble;
+    }
+
+    const contentEl = state.voiceChat.currentUserBubble.querySelector('.bubble-content');
+    contentEl.textContent = text;
+    elements.voiceDialogueBox.scrollTop = elements.voiceDialogueBox.scrollHeight;
+
+    if (isFinal) {
+        state.voiceChat.currentUserBubble = null;
+    }
+}
+
+/**
+ * Appends incoming AI response text tokens to the live captions dialogue panel.
+ */
+function appendAiDialogue(text) {
+    if (!text) return;
+
+    if (elements.dialoguePlaceholder && elements.dialoguePlaceholder.style.display !== 'none') {
+        elements.dialoguePlaceholder.style.display = 'none';
+    }
+
+    const voice = elements.voiceName?.value || GEMINI_CONFIG.defaultVoice;
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    if (!state.voiceChat.currentAiBubble) {
+        const bubble = document.createElement('div');
+        bubble.className = 'dialogue-bubble ai';
+        bubble.innerHTML = `
+            <div class="bubble-meta"><span>Ustad 🤖 (${voice})</span> • <span>${time}</span></div>
+            <div class="bubble-content"></div>
+        `;
+        elements.voiceDialogueBox.appendChild(bubble);
+        state.voiceChat.currentAiBubble = bubble;
+        state.voiceChat.currentAiText = '';
+    }
+
+    state.voiceChat.currentAiText += text;
+    const contentEl = state.voiceChat.currentAiBubble.querySelector('.bubble-content');
+    contentEl.textContent = state.voiceChat.currentAiText;
+    elements.voiceDialogueBox.scrollTop = elements.voiceDialogueBox.scrollHeight;
+}
+
+/**
+ * Appends user query in the Live Voice Query captions panel.
+ */
+function appendLiveQueryUserDialogue(text) {
+    if (!text || !text.trim() || !elements.liveQueryDialogueBox) return;
+
+    if (elements.liveQueryPlaceholder && elements.liveQueryPlaceholder.style.display !== 'none') {
+        elements.liveQueryPlaceholder.style.display = 'none';
+    }
+
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    const bubble = document.createElement('div');
+    bubble.className = 'dialogue-bubble user';
+    bubble.innerHTML = `
+        <div class="bubble-meta"><span>You 👤</span> • <span>${time}</span></div>
+        <div class="bubble-content"></div>
+    `;
+    bubble.querySelector('.bubble-content').textContent = text;
+    elements.liveQueryDialogueBox.appendChild(bubble);
+    elements.liveQueryDialogueBox.scrollTop = elements.liveQueryDialogueBox.scrollHeight;
+}
+
+/**
+ * Appends streaming model response tokens to the Live Voice Query captions panel.
+ */
+function appendLiveQueryAiDialogue(text) {
+    if (!text || !elements.liveQueryDialogueBox) return;
+
+    if (elements.liveQueryPlaceholder && elements.liveQueryPlaceholder.style.display !== 'none') {
+        elements.liveQueryPlaceholder.style.display = 'none';
+    }
+
+    const voice = elements.voiceName?.value || GEMINI_CONFIG.defaultVoice;
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    if (!state.liveQuery.currentAiBubble) {
+        const bubble = document.createElement('div');
+        bubble.className = 'dialogue-bubble ai';
+        bubble.innerHTML = `
+            <div class="bubble-meta"><span>Ustad 🤖 (${voice})</span> • <span>${time}</span></div>
+            <div class="bubble-content"></div>
+        `;
+        elements.liveQueryDialogueBox.appendChild(bubble);
+        state.liveQuery.currentAiBubble = bubble;
+        state.liveQuery.currentAiText = '';
+    }
+
+    state.liveQuery.currentAiText += text;
+    const contentEl = state.liveQuery.currentAiBubble.querySelector('.bubble-content');
+    if (contentEl) {
+        contentEl.textContent = state.liveQuery.currentAiText;
+    }
+    elements.liveQueryDialogueBox.scrollTop = elements.liveQueryDialogueBox.scrollHeight;
+}
+
+/**
+ * Streams real-time AI response text captions to the dialogue panel
+ * concurrently while Gemini Live speaks the response audio.
+ */
+async function fetchAndStreamAiCaptions(query, targetMode = 'voiceChat') {
+    const apiKey = elements.apiKey.value.trim();
+    if (!apiKey || !query) return;
+
+    // Abort previous caption fetch if still active
+    if (state.currentCaptionAbortController) {
+        try { state.currentCaptionAbortController.abort(); } catch (_) {}
+    }
+    const abortController = new AbortController();
+    state.currentCaptionAbortController = abortController;
+
+    const mode = getActiveMode();
+    const systemInstruction = mode.systemInstruction ||
+        "You are Ustad (also respectfully called Ustad Ji), a helpful, concise AI voice assistant. Your name is Ustad. If asked about your name or identity, always answer that your name is Ustad or Ustad Ji (e.g. 'Mera naam Ustad hai.', 'My name is Ustad.'). Answer naturally, directly, and conversationally in 1 to 3 sentences.";
+
+    try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    role: 'user',
+                    parts: [{ text: query }]
+                }],
+                systemInstruction: {
+                    parts: [{ text: systemInstruction }]
+                },
+                generationConfig: {
+                    maxOutputTokens: 300,
+                    temperature: 0.7
+                }
+            }),
+            signal: abortController.signal
+        });
+
+        if (!response.ok) {
+            logMessage(`Caption stream status ${response.status} — audio stream continues.`);
+            return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const jsonStr = line.slice(6).trim();
+                    if (!jsonStr || jsonStr === '[DONE]') continue;
+                    try {
+                        const parsed = JSON.parse(jsonStr);
+                        const chunkText = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                        if (chunkText) {
+                            if (targetMode === 'voiceChat') {
+                                appendAiDialogue(chunkText);
+                            } else if (targetMode === 'live') {
+                                appendLiveQueryAiDialogue(chunkText);
+                            }
+                            appendTranscript(chunkText);
+                        }
+                    } catch (_) {}
+                }
+            }
+        }
+    } catch (err) {
+        if (err.name !== 'AbortError') {
+            logMessage(`Caption stream notice: ${err.message}`);
+        }
+    } finally {
+        if (state.currentCaptionAbortController === abortController) {
+            state.currentCaptionAbortController = null;
+        }
+    }
+}
+
+/**
+ * Initiates the real-time voice-to-voice conversation.
+ * Verifies API key, requests microphone permissions, establishes live WebSocket session,
+ * and activates streaming.
+ */
+async function startVoiceChat() {
+    const apiKey = elements.apiKey.value.trim();
+    if (!apiKey) {
+        alert('Please enter your Ustad API Key first.');
+        elements.apiKey.focus();
+        return;
+    }
+
+    setVoiceBotState('connecting');
+
+    try {
+        if (!state.voiceChat.micStream) {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: 1,
+                    sampleRate: 16000,
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+            state.voiceChat.micStream = stream;
+        }
+    } catch (err) {
+        logMessage(`Microphone permission error: ${err.name} - ${err.message}`, true);
+        alert(`Microphone access is required for real-time voice chat.\n${err.message}`);
+        setVoiceBotState('ready');
+        return;
+    }
+
+    state.voiceChat.pendingActivation = true;
+
+    if (!state.isConnected || !state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        connectSession();
+    } else {
+        onVoiceChatConnected();
+    }
+}
+
+/**
+ * Called once the Gemini Live WebSocket session handshake completes in voiceChat mode.
+ */
+async function onVoiceChatConnected() {
+    state.voiceChat.isActive = true;
+    elements.startVoiceChatBtnText.textContent = 'End Conversation';
+    elements.startVoiceChatBtn.classList.add('in-call');
+    elements.startVoiceChatBtn.querySelector('.btn-icon').textContent = '📞';
+    elements.muteMicBtn.disabled = false;
+
+    try {
+        await initVoiceChatMicrophone();
+        initVoiceChatSpeechRecognition();
+        setVoiceBotState('listening');
+        logMessage('Real-time voice-to-voice conversation is now LIVE! Speak naturally in any language.');
+    } catch (err) {
+        logMessage(`Failed to initialize microphone processing: ${err.message}`, true);
+        alert(`Microphone error: ${err.message}`);
+        endVoiceChat();
+    }
+}
+
+/**
+ * Cleanly ends the real-time voice conversation and releases all audio and microphone resources.
+ */
+function endVoiceChat() {
+    state.voiceChat.pendingActivation = false;
+    state.voiceChat.isActive = false;
+
+    if (state.voiceChat.silenceTimer) {
+        clearTimeout(state.voiceChat.silenceTimer);
+        state.voiceChat.silenceTimer = null;
+    }
+    if (state.voiceChat.thinkingWatchdog) {
+        clearTimeout(state.voiceChat.thinkingWatchdog);
+        state.voiceChat.thinkingWatchdog = null;
+    }
+    if (state.currentCaptionAbortController) {
+        try { state.currentCaptionAbortController.abort(); } catch (_) {}
+        state.currentCaptionAbortController = null;
+    }
+
+    if (state.voiceChat.micStream) {
+        state.voiceChat.micStream.getTracks().forEach((track) => track.stop());
+        state.voiceChat.micStream = null;
+    }
+
+    if (state.voiceChat.micProcessor) {
+        try { state.voiceChat.micProcessor.disconnect(); } catch (_) {}
+        state.voiceChat.micProcessor = null;
+    }
+    if (state.voiceChat.micSource) {
+        try { state.voiceChat.micSource.disconnect(); } catch (_) {}
+        state.voiceChat.micSource = null;
+    }
+
+    if (state.voiceChat.speechRecognition) {
+        try { state.voiceChat.speechRecognition.stop(); } catch (_) {}
+        state.voiceChat.speechRecognition = null;
+    }
+
+    interruptAiSpeech('Conversation ended');
+
+    elements.startVoiceChatBtnText.textContent = 'Start Conversation';
+    elements.startVoiceChatBtn.classList.remove('in-call');
+    elements.startVoiceChatBtn.querySelector('.btn-icon').textContent = '🎙️';
+    elements.muteMicBtn.disabled = true;
+    elements.muteMicBtn.classList.remove('muted');
+    elements.muteMicBtnIcon.textContent = '🎤';
+    elements.muteMicBtnText.textContent = 'Mute';
+    state.voiceChat.isMuted = false;
+    elements.interruptBtn.disabled = true;
+    if (elements.audioLevelFill) elements.audioLevelFill.style.width = '0%';
+
+    setVoiceBotState('ready');
+    logMessage('Voice chat conversation ended. Audio and mic resources released.');
+}
+
+/**
+ * Toggles microphone mute state during an active voice session.
+ */
+function toggleMicMute() {
+    if (!state.voiceChat.isActive) return;
+
+    state.voiceChat.isMuted = !state.voiceChat.isMuted;
+
+    if (state.voiceChat.isMuted) {
+        elements.muteMicBtn.classList.add('muted');
+        elements.muteMicBtnIcon.textContent = '🔇';
+        elements.muteMicBtnText.textContent = 'Unmute';
+        if (state.voiceChat.micStream) {
+            state.voiceChat.micStream.getAudioTracks().forEach((t) => t.enabled = false);
+        }
+        if (elements.audioLevelFill) elements.audioLevelFill.style.width = '0%';
+        setVoiceBotState('muted');
+        logMessage('Microphone muted.');
+    } else {
+        elements.muteMicBtn.classList.remove('muted');
+        elements.muteMicBtnIcon.textContent = '🎤';
+        elements.muteMicBtnText.textContent = 'Mute';
+        if (state.voiceChat.micStream) {
+            state.voiceChat.micStream.getAudioTracks().forEach((t) => t.enabled = true);
+        }
+        setVoiceBotState('listening');
+        logMessage('Microphone unmuted.');
+    }
+}
+
+/**
+ * Renders quick conversation topic starter chips for Voice Bot mode.
+ */
+function renderVoicePresets(presets) {
+    if (!elements.voicePresetChips) return;
+    elements.voicePresetChips.innerHTML = '';
+    (presets || []).forEach((preset) => {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.textContent = preset.label;
+        chip.title = preset.text;
+        chip.addEventListener('click', async () => {
+            logMessage(`Voice topic clicked: "${preset.label}"`);
+            if (!state.voiceChat.isActive) {
+                await startVoiceChat();
+            }
+            setTimeout(() => {
+                if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+                    appendUserDialogue(preset.text, true);
+                    setVoiceBotState('thinking');
+                    try {
+                        state.ws.send(JSON.stringify({
+                            clientContent: {
+                                turns: [{
+                                    role: 'user',
+                                    parts: [{ text: preset.text }]
+                                }],
+                                turnComplete: true
+                            }
+                        }));
+                    } catch (e) {
+                        logMessage(`Topic prompt error: ${e.message}`);
+                    }
+                }
+            }, 600);
+        });
+        elements.voicePresetChips.appendChild(chip);
+    });
+}
+
+// Wire Voice Bot control buttons
+elements.startVoiceChatBtn?.addEventListener('click', async () => {
+    if (state.voiceChat.isActive) {
+        endVoiceChat();
+    } else {
+        await startVoiceChat();
+    }
+});
+
+elements.muteMicBtn?.addEventListener('click', () => {
+    toggleMicMute();
+});
+
+elements.interruptBtn?.addEventListener('click', () => {
+    interruptAiSpeech('User tapped Interrupt button');
+});
+
+elements.clearDialogueBtn?.addEventListener('click', () => {
+    if (elements.voiceDialogueBox) {
+        elements.voiceDialogueBox.innerHTML = `
+            <div class="dialogue-placeholder" id="dialoguePlaceholder">
+                💬 Your live conversation captions will stream here in real time. Speak naturally into your microphone!
+            </div>
+        `;
+        elements.dialoguePlaceholder = $('dialoguePlaceholder');
+    }
+    state.voiceChat.currentAiBubble = null;
+    state.voiceChat.currentUserBubble = null;
+    logMessage('Live dialogue cleared.');
+});
+
+// Wire Live Voice Query dialogue clear button
+elements.clearLiveQueryDialogueBtn?.addEventListener('click', () => {
+    if (elements.liveQueryDialogueBox) {
+        elements.liveQueryDialogueBox.innerHTML = `
+            <div class="dialogue-placeholder" id="liveQueryPlaceholder">
+                💬 Your query and Ustad's streamed live response captions will appear here in real time.
+            </div>
+        `;
+        elements.liveQueryPlaceholder = $('liveQueryPlaceholder');
+    }
+    state.liveQuery.currentAiBubble = null;
+    state.liveQuery.currentAiText = '';
+    logMessage('Live Voice Query dialogue cleared.');
+});
+
+// Wire Microphone Sensitivity dropdown
+elements.micSensitivitySelect?.addEventListener('change', (e) => {
+    state.voiceChat.sensitivityMode = e.target.value;
+    logMessage(`Microphone sensitivity set to: ${e.target.value}`);
+});
 
 /* ==========================================================================
    Keyboard Shortcuts
@@ -1652,19 +3130,46 @@ document.addEventListener('keydown', (event) => {
 
     if (event.ctrlKey && event.key === 'Enter') {
         event.preventDefault();
-        elements.speakBtn.click();
+        if (state.mode === 'voiceChat') {
+            elements.startVoiceChatBtn?.click();
+        } else {
+            elements.speakBtn?.click();
+        }
         return;
     }
+
     if (event.key === 'Escape') {
+        if (state.mode === 'voiceChat' && state.voiceChat.botState === 'ai-speaking') {
+            event.preventDefault();
+            interruptAiSpeech('Escape key pressed');
+            return;
+        }
         closeSidebar();
         return;
     }
+
     if (typing) return;
+
+    if (state.mode === 'voiceChat' && state.voiceChat.isActive) {
+        if (event.key === 'm' || event.key === 'M') {
+            event.preventDefault();
+            toggleMicMute();
+            return;
+        }
+    }
 
     if (event.code === 'Space') {
         event.preventDefault();
+        if (state.mode === 'voiceChat') {
+            if (state.voiceChat.isActive) {
+                toggleMicMute();
+            } else {
+                elements.startVoiceChatBtn?.click();
+            }
+            return;
+        }
+
         if (isStreamingMode()) {
-            // In live mode the space bar toggles the live stream itself.
             if (state.isStreaming && !state.isPaused) {
                 elements.pauseAudioBtn.click();
             } else {
@@ -1672,6 +3177,7 @@ document.addEventListener('keydown', (event) => {
             }
             return;
         }
+
         if (state.isPlaying) {
             elements.pauseAudioBtn.click();
         } else {
@@ -1686,7 +3192,8 @@ document.addEventListener('keydown', (event) => {
 window.addEventListener('DOMContentLoaded', () => {
     loadPreferences();
     initVisualizer();
+    initVoiceOrb();
     logMessage(
-        `Gemini Live Voice Studio v3.9.0 ready — model ${GEMINI_CONFIG.model} (shared by Text to Speech and Live Voice Query).`
+        `Ustad Live Voice Studio v3.9.0 ready — model ${GEMINI_CONFIG.modelLabel || GEMINI_CONFIG.model} with Real-Time Voice Bot.`
     );
 });

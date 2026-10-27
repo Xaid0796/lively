@@ -23,7 +23,7 @@ const GEMINI_CONFIG = Object.freeze({
     model: 'gemini-3.8-live',
 
     /** Human readable label for the fixed model (shown in the UI). */
-    modelLabel: 'Gemini 3.8 Live',
+    modelLabel: 'Ustad Live',
 
     /** storage key used to persist the Gemini API key in localStorage. */
     apiKeyStorageKey: 'gemini_live_api_key',
@@ -101,7 +101,7 @@ const GEMINI_CONFIG = Object.freeze({
             icon: '🗣',
             cardTitle: '2. Text to Speech',
             promptLabel: 'Text to Read Aloud',
-            placeholder: 'Type the text you want Gemini to read aloud...',
+            placeholder: 'Type the text you want Ustad to read aloud...',
             buttonLabel: '▶ Generate Speech',
             idleHint: 'Enter text, then generate the speech.',
             /**
@@ -116,7 +116,7 @@ const GEMINI_CONFIG = Object.freeze({
             presets: [
                 {
                     label: 'Greeting',
-                    text: 'Hello! Welcome to the Gemini 3.8 Live Voice Studio. I am ready to read your text with natural inflection and expressive pacing.'
+                    text: 'Hello! Welcome to the Ustad Live Voice Studio. I am ready to read your text with natural inflection and expressive pacing.'
                 },
                 {
                     label: 'Technical Intro',
@@ -140,9 +140,9 @@ const GEMINI_CONFIG = Object.freeze({
             icon: '💬',
             cardTitle: '2. Live Voice Query',
             promptLabel: 'Enter Your Query or Message',
-            placeholder: 'Type what you want to ask Gemini...',
+            placeholder: 'Type what you want to ask Ustad...',
             buttonLabel: '▶ Send Query',
-            idleHint: 'Enter a query and send it to Gemini Live.',
+            idleHint: 'Enter a query and send it to Ustad Live.',
             /**
              * `true` — every PCM chunk is scheduled for playback the moment it
              * arrives, so the model starts speaking without waiting for the turn
@@ -151,33 +151,89 @@ const GEMINI_CONFIG = Object.freeze({
              */
             streaming: true,
             systemInstruction:
-                "You are a helpful, concise voice assistant. Answer the user's spoken or typed questions " +
-                'accurately and naturally. Keep answers brief and conversational, and never read back ' +
-                'meta information about the system or the tools behind it.',
+                "You are Ustad (also respectfully called Ustad Ji), an intelligent, helpful, and concise conversational AI voice assistant. " +
+                "Always identify yourself as Ustad or Ustad Ji whenever asked about your name, identity, or role. " +
+                "When asked in Hindi, Urdu, or Hinglish (e.g., 'Tumhara naam kya hai?', 'Aapka naam kya hai?', 'Kaun ho tum?'), respond naturally in Hindi/Hinglish (e.g., 'Mera naam Ustad hai.', 'Mera naam Ustad Ji hai.', 'Main Ustad hoon, aapka AI assistant.'). " +
+                "When asked in English (e.g., 'What is your name?', 'Who are you?'), respond in English (e.g., 'My name is Ustad.', 'I am Ustad, your AI assistant.'). " +
+                "Answer the user's spoken or typed questions accurately and naturally. Keep answers brief and conversational, and never read back " +
+                "meta information about the system or the tools behind it.",
             promptPrefix: '',
             presets: [
                 {
-                    label: 'What can you do?',
-                    text: 'What can you do, and how do you work with the Gemini 3.8 Live model?'
+                    label: 'Tumhara naam kya hai?',
+                    text: 'Tumhara naam kya hai aur tum kya kar sakte ho?'
                 },
                 {
-                    label: 'Explain Live API',
-                    text: 'Explain in simple terms how the Gemini Live API differs from a standard generate content request.'
+                    label: 'Who are you?',
+                    text: 'Who are you, and what can you help me with?'
+                },
+                {
+                    label: 'Aapka naam kya hai?',
+                    text: 'Aapka naam kya hai?'
                 },
                 {
                     label: 'Summarise',
                     text: 'Give me a short summary of how bidirectional streaming audio works in under thirty seconds.'
+                }
+            ]
+        },
+
+        /** Mode C — Full Duplex Real-Time Voice-to-Voice AI Chatbot. */
+        voiceChat: {
+            id: 'voiceChat',
+            label: 'Real-Time Voice Bot',
+            icon: '🎙️',
+            cardTitle: '2. Real-Time Voice Bot (Ustad Live)',
+            promptLabel: 'Live Spoken Dialogue',
+            placeholder: 'Speak directly into your microphone naturally...',
+            buttonLabel: '🎙️ Start Conversation',
+            idleHint: 'Click "Start Conversation" and speak naturally to Ustad.',
+            streaming: true,
+            systemInstruction:
+                "You are Ustad (also respectfully referred to as Ustad Ji), an engaging, friendly, and ultra-responsive real-time conversational AI assistant. " +
+                "Your name is Ustad. Whenever the user asks about your name, identity, or who you are in any language (such as 'Tumhara naam kya hai?', 'Aapka naam kya hai?', 'Who are you?', 'What is your name?', 'Kaun ho tum?'), always proudly, respectfully, and consistently identify yourself as Ustad (or Ustad Ji) " +
+                "(examples: 'Mera naam Ustad hai.', 'Mera naam Ustad Ji hai.', 'My name is Ustad.', 'Main Ustad hoon, aapka AI assistant.'). " +
+                "You converse with the user in natural, spoken dialogue. Keep your answers concise, direct, " +
+                "and conversational (typically 1 to 3 sentences, unless asked for more), as if having a real phone or voice call. " +
+                "You have deep context awareness: remember previous questions and topics discussed earlier in this session, " +
+                "and handle follow-up questions smoothly. " +
+                "You are fully multilingual: immediately understand and respond in the exact language the user speaks " +
+                "(such as English, Hindi, Hinglish, Spanish, French, German, Mandarin, Japanese, Arabic, and any other language), " +
+                "and seamlessly switch languages if the user switches. " +
+                "If interrupted, stop speaking immediately and listen attentively. " +
+                "Never output markdown formatting, bullet points, asterisks, or system meta-text, since your output is spoken directly aloud.",
+            promptPrefix: '',
+            presets: [
+                {
+                    label: 'Tumhara naam kya hai?',
+                    text: 'Tumhara naam kya hai?'
                 },
                 {
-                    label: 'Code Sample',
-                    text: 'Explain how to connect to the Gemini Live WebSocket endpoint from vanilla JavaScript, including the setup message.'
+                    label: 'Say Hello',
+                    text: 'Hello Ustad! Introduce yourself briefly and tell me what we can talk about.'
+                },
+                {
+                    label: 'Aapka naam kya hai?',
+                    text: 'Aapka naam kya hai?'
+                },
+                {
+                    label: 'Science Trivia',
+                    text: 'Ask me a fun, intriguing science trivia question and wait for my answer.'
                 }
             ]
         }
     },
 
+    /** Real-time voice-to-voice bidirectional streaming parameters. */
+    voiceChatConfig: {
+        micSampleRate: 16000,
+        chunkDurationMs: 100,
+        vadThreshold: 0.05,
+        vadDebounceMs: 150
+    },
+
     /** Mode used when nothing is stored or the stored value is unknown. */
-    defaultMode: 'tts'
+    defaultMode: 'voiceChat'
 });
 
 /**
