@@ -280,6 +280,12 @@ function setMode(modeId) {
     if (state.mode === 'voiceChat' && state.voiceChat.isActive) {
         endVoiceChat();
     }
+    if (state.voiceChat.micStream) {
+        try {
+            state.voiceChat.micStream.getTracks().forEach((t) => t.stop());
+        } catch (_) { }
+        state.voiceChat.micStream = null;
+    }
 
     state.mode = modeId;
     const mode = getActiveMode();
@@ -1875,6 +1881,14 @@ elements.micBtn.onclick = () => {
         return;
     }
 
+    // Release any background getUserMedia streams so Android OS does not report "Chrome is recording"
+    if (state.voiceChat.micStream) {
+        try {
+            state.voiceChat.micStream.getTracks().forEach((t) => t.stop());
+        } catch (_) { }
+        state.voiceChat.micStream = null;
+    }
+
     if (!recognition) {
         initSpeechRecognition();
         return;
@@ -1907,6 +1921,14 @@ elements.exportLogs.onclick = () => {
 /* ==========================================================================
    Real-Time Voice-to-Voice AI Chatbot Engine
    ========================================================================== */
+
+/**
+ * Detects whether the current client device is a mobile or touch device.
+ */
+function isMobileDevice() {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+        (window.matchMedia && window.matchMedia('(max-width: 800px)').matches && 'ontouchstart' in window);
+}
 
 /**
  * High-quality linear interpolation resampler to convert microphone audio (typically 44.1kHz or 48kHz)
@@ -2069,11 +2091,15 @@ function initVoiceOrb() {
             let sum = 0;
             for (let i = 0; i < 32; i++) sum += freqData[i];
             audioEnergy = (sum / 32) / 255;
-        } else if (botState === 'user-speaking' && state.voiceChat.micAnalyser) {
-            state.voiceChat.micAnalyser.getByteFrequencyData(freqData);
-            let sum = 0;
-            for (let i = 0; i < 32; i++) sum += freqData[i];
-            audioEnergy = (sum / 32) / 255;
+        } else if (botState === 'user-speaking') {
+            if (state.voiceChat.micAnalyser) {
+                state.voiceChat.micAnalyser.getByteFrequencyData(freqData);
+                let sum = 0;
+                for (let i = 0; i < 32; i++) sum += freqData[i];
+                audioEnergy = (sum / 32) / 255;
+            } else {
+                audioEnergy = 0.35 + Math.sin(performance.now() * 0.007) * 0.2;
+            }
         }
 
         // Color palettes per state
@@ -2185,6 +2211,11 @@ function initVoiceOrb() {
  */
 async function initVoiceChatMicrophone() {
     ensureAudioContext();
+
+    if (isMobileDevice()) {
+        logMessage('Mobile device active: Bypassing background getUserMedia to prevent Android Speech Recognition hardware conflict.');
+        return;
+    }
 
     if (!state.voiceChat.micStream || !state.voiceChat.micStream.active) {
         state.voiceChat.micStream = await navigator.mediaDevices.getUserMedia({
@@ -2543,6 +2574,39 @@ function initVoiceChatSpeechRecognition() {
         recognition.interimResults = true;
         recognition.lang = navigator.language || 'en-US';
 
+        recognition.onspeechstart = () => {
+            if (!state.voiceChat.isActive) return;
+            const now = performance.now();
+            const isAiSpeaking = state.voiceChat.botState === 'ai-speaking' ||
+                state.voiceChat.activeAiAudioNodes.length > 0 ||
+                (state.audioCtx && state.audioCtx.currentTime < state.voiceChat.aiAudioScheduledEndTime) ||
+                state.voiceChat.isSpeechRecognitionSuppressed;
+            if (isAiSpeaking) return;
+
+            if (state.voiceChat.botState !== 'user-speaking') {
+                setVoiceBotState('user-speaking');
+                if (!state.voiceChat.currentUserBubble) {
+                    appendUserDialogue('🎙️ Speaking...', false);
+                }
+            }
+            if (state.voiceChat.silenceTimer) {
+                clearTimeout(state.voiceChat.silenceTimer);
+                state.voiceChat.silenceTimer = null;
+            }
+        };
+
+        recognition.onspeechend = () => {
+            if (!state.voiceChat.isActive || state.voiceChat.botState !== 'user-speaking') return;
+            if (isMobileDevice() && !state.voiceChat.silenceTimer) {
+                state.voiceChat.silenceTimer = setTimeout(() => {
+                    if (state.voiceChat.isActive && state.voiceChat.botState === 'user-speaking') {
+                        finishUserVoiceTurn();
+                    }
+                    state.voiceChat.silenceTimer = null;
+                }, 1400);
+            }
+        };
+
         recognition.onresult = (event) => {
             if (!state.voiceChat.isActive) return;
 
@@ -2558,6 +2622,10 @@ function initVoiceChatSpeechRecognition() {
             // Suppress transcription when model is speaking, thinking, or in echo tail
             if (isAiSpeaking || isThinking || inEchoTail) {
                 return;
+            }
+
+            if (state.voiceChat.botState !== 'user-speaking') {
+                setVoiceBotState('user-speaking');
             }
 
             let interim = '';
@@ -2591,6 +2659,18 @@ function initVoiceChatSpeechRecognition() {
                     (state.voiceChat.currentTurnUserText ? state.voiceChat.currentTurnUserText + ' ' : '') + interim.trim()
                 ).trim();
                 appendUserDialogue(display, false);
+            }
+
+            if (isMobileDevice()) {
+                if (state.voiceChat.silenceTimer) {
+                    clearTimeout(state.voiceChat.silenceTimer);
+                }
+                state.voiceChat.silenceTimer = setTimeout(() => {
+                    if (state.voiceChat.isActive && state.voiceChat.botState === 'user-speaking') {
+                        finishUserVoiceTurn();
+                    }
+                    state.voiceChat.silenceTimer = null;
+                }, 1800);
             }
         };
 
@@ -3028,24 +3108,26 @@ async function startVoiceChat() {
 
     setVoiceBotState('connecting');
 
-    try {
-        if (!state.voiceChat.micStream) {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    channelCount: 1,
-                    sampleRate: 16000,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                }
-            });
-            state.voiceChat.micStream = stream;
+    if (!isMobileDevice()) {
+        try {
+            if (!state.voiceChat.micStream) {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+                state.voiceChat.micStream = stream;
+            }
+        } catch (err) {
+            logMessage(`Microphone permission error: ${err.name} - ${err.message}`, true);
+            alert(`Microphone access is required for real-time voice chat.\n${err.message}`);
+            setVoiceBotState('ready');
+            return;
         }
-    } catch (err) {
-        logMessage(`Microphone permission error: ${err.name} - ${err.message}`, true);
-        alert(`Microphone access is required for real-time voice chat.\n${err.message}`);
-        setVoiceBotState('ready');
-        return;
     }
 
     state.voiceChat.pendingActivation = true;
