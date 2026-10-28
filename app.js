@@ -178,7 +178,9 @@ const state = {
         interruptionDebounce: 0,
         silenceTimer: null,
         thinkingWatchdog: null,
+        responseWatchdog: null,
         isSpeechRecognitionSuppressed: false,
+        speechRecognitionAvailable: false,
         lastAiSpeechEndTime: 0,
         suppressUserTranscriptionUntil: 0,
         recentAiTexts: []
@@ -993,10 +995,14 @@ function handleServerMessage(message) {
         const inputText = serverContent.inputTranscription?.text;
         if (inputText) {
             logMessage(`Input transcript: ${inputText}`);
-            if (state.mode === 'voiceChat') {
-                appendUserDialogue(inputText, true);
+            // In voiceChat mode, user query is already displayed in real-time in the live bubble.
+            // Avoid creating duplicate bubbles if already displayed.
+            if (state.mode === 'voiceChat' && state.voiceChat.currentUserBubble) {
+                const contentEl = state.voiceChat.currentUserBubble.querySelector('.bubble-content');
+                if (contentEl && contentEl.textContent.includes('Speaking...')) {
+                    contentEl.textContent = inputText;
+                }
             }
-            // (Live Voice Query mode uses typed text via speakBtn, not mic transcription)
         }
 
         // --- Output (Model) Audio Transcription ---
@@ -1052,6 +1058,19 @@ function handleServerMessage(message) {
 
             if (state.mode === 'voiceChat') {
                 logMessage('Voice turn complete.');
+
+                // Clean up caption abort controller
+                if (state.currentCaptionAbortController) {
+                    try { state.currentCaptionAbortController.abort(); } catch (_) { }
+                    state.currentCaptionAbortController = null;
+                }
+
+                // Cache AI text to recentAiTexts so echo filter retains it while audio continues to play
+                if (state.voiceChat.currentAiText) {
+                    state.voiceChat.recentAiTexts.push(state.voiceChat.currentAiText);
+                    if (state.voiceChat.recentAiTexts.length > 10) state.voiceChat.recentAiTexts.shift();
+                }
+
                 if (state.voiceChat.activeAiAudioNodes.length === 0) {
                     setVoiceBotState('listening');
                     state.voiceChat.currentAiBubble = null;
@@ -2167,7 +2186,7 @@ function initVoiceOrb() {
 async function initVoiceChatMicrophone() {
     ensureAudioContext();
 
-    if (!state.voiceChat.micStream) {
+    if (!state.voiceChat.micStream || !state.voiceChat.micStream.active) {
         state.voiceChat.micStream = await navigator.mediaDevices.getUserMedia({
             audio: {
                 channelCount: 1,
@@ -2177,6 +2196,12 @@ async function initVoiceChatMicrophone() {
                 autoGainControl: true
             }
         });
+    }
+
+    if (state.voiceChat.micProcessor) {
+        try { state.voiceChat.micProcessor.onaudioprocess = null; } catch (_) { }
+        try { state.voiceChat.micProcessor.disconnect(); } catch (_) { }
+        state.voiceChat.micProcessor = null;
     }
 
     state.voiceChat.micAudioCtx = state.audioCtx;
@@ -2303,7 +2328,7 @@ async function initVoiceChatMicrophone() {
                                     }]
                                 }
                             }));
-                        } catch (_) {}
+                        } catch (_) { }
                     }
                     preRollChunks = [];
                 }
@@ -2332,7 +2357,7 @@ async function initVoiceChatMicrophone() {
         }
 
         // SPEECH END / TURN COMPLETION:
-        // After user stops speaking, wait for 2 full seconds of silence before triggering response.
+        // After user stops speaking, wait for 1.2 seconds of silence before triggering response.
         if (state.voiceChat.botState === 'user-speaking' && state.voiceChat.hasSpokenInTurn) {
             if (state.voiceChat.consecutiveSilenceFrames >= 7 && !state.voiceChat.silenceTimer) {
                 state.voiceChat.silenceTimer = setTimeout(() => {
@@ -2340,7 +2365,7 @@ async function initVoiceChatMicrophone() {
                         finishUserVoiceTurn();
                     }
                     state.voiceChat.silenceTimer = null;
-                }, 2000); // 2-second pause before model responds
+                }, 1800); // 1.8-second pause before model responds
             }
         }
     };
@@ -2354,6 +2379,12 @@ async function initVoiceChatMicrophone() {
 function finishUserVoiceTurn() {
     if (!state.voiceChat.isActive || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
 
+    // Reset turn completion flag for new turn
+    state.turnComplete = false;
+
+    // Reset speech recognition suppression flag so microphone is ready for next turn
+    state.voiceChat.isSpeechRecognitionSuppressed = false;
+
     let userQuery = (
         (state.voiceChat.currentTurnUserText || '') +
         (state.voiceChat.lastInterimText ? ' ' + state.voiceChat.lastInterimText : '')
@@ -2365,18 +2396,21 @@ function finishUserVoiceTurn() {
         }
     }
 
-    logMessage(`2-second silence confirmed. Initiating model response for: "${userQuery || '[Voice Query]'}"`);
+    logMessage(`Silence confirmed. Initiating AI response for: "${userQuery || '[Voice Query]'}"`);
     setVoiceBotState('thinking');
     state.voiceChat.isSpeechRecognitionSuppressed = true;
     try {
         state.voiceChat.speechRecognition?.abort();
-    } catch (_) {}
+    } catch (_) { }
 
-    // Finalize user dialogue bubble in the conversation history
-    if (userQuery) {
-        appendUserDialogue(userQuery, true);
+    // Finalize user dialogue bubble in the conversation history without creating duplicates
+    const finalUserText = userQuery || '🎙️ Spoken voice query';
+    if (state.voiceChat.currentUserBubble) {
+        const contentEl = state.voiceChat.currentUserBubble.querySelector('.bubble-content');
+        if (contentEl) contentEl.textContent = finalUserText;
+        state.voiceChat.currentUserBubble = null;
     } else {
-        appendUserDialogue('🎙️ Spoken voice query', true);
+        appendUserDialogue(finalUserText, true);
     }
 
     state.voiceChat.hasSpokenInTurn = false;
@@ -2399,25 +2433,19 @@ function finishUserVoiceTurn() {
                     turnComplete: true
                 }
             }));
-            logMessage(`Dispatched spoken query to Ustad Live: "${userQuery}"`);
+            logMessage(`Dispatched query to Ustad Live: "${userQuery}"`);
+
+            // Stream text captions in real time for the AI response
+            fetchAndStreamAiCaptions(userQuery, 'voiceChat');
         } else {
             // Native audio turn completion: tell Ustad Live the voice stream turn is complete
-            // so it responds directly to the streamed 16kHz PCM audio without requiring client-side SpeechRecognition.
             state.ws.send(JSON.stringify({
                 clientContent: {
                     turnComplete: true
                 }
             }));
-            logMessage('Dispatched turnComplete signal to Ustad Live for native audio query.');
-            // Note: Never call fetchAndStreamAiCaptions with dummy text ('Voice conversation response')
-            // as that triggers generic greeting loops! Ustad Live sends its own speech and text stream.
+            logMessage('Dispatched turnComplete signal to Ustad Live for native audio query');
         }
-
-        if (userQuery) {
-            // Stream text captions in real time for the AI response
-            fetchAndStreamAiCaptions(userQuery, 'voiceChat');
-        }
-
     } catch (e) {
         logMessage(`Turn completion dispatch error: ${e.message}`, true);
     }
@@ -2426,12 +2454,21 @@ function finishUserVoiceTurn() {
     if (state.voiceChat.thinkingWatchdog) clearTimeout(state.voiceChat.thinkingWatchdog);
     state.voiceChat.thinkingWatchdog = setTimeout(() => {
         if (state.voiceChat.isActive && state.voiceChat.botState === 'thinking') {
-            logMessage('Thinking watchdog: server took >10s, resetting to listening.');
+            logMessage('Thinking watchdog: server took >10s, resetting to listening');
             state.voiceChat.isSpeechRecognitionSuppressed = false;
             setVoiceBotState('listening');
-            try { state.voiceChat.speechRecognition?.start(); } catch (_) {}
+            try { state.voiceChat.speechRecognition?.start(); } catch (_) { }
         }
     }, 10000);
+
+    // Response watchdog: ensure AI doesn't get stuck in 'ai-speaking' state indefinitely
+    if (state.voiceChat.responseWatchdog) clearTimeout(state.voiceChat.responseWatchdog);
+    state.voiceChat.responseWatchdog = setTimeout(() => {
+        if (state.voiceChat.isActive && state.voiceChat.botState === 'ai-speaking') {
+            logMessage('Response watchdog: AI response took >60s, forcing reset', true);
+            interruptAiSpeech('Response timeout');
+        }
+    }, 60000);
 }
 
 /**
@@ -2444,29 +2481,41 @@ function isModelSpeechEcho(text) {
     const candNorm = normalize(text);
     if (!candNorm || candNorm.length < 3) return false;
 
-    const textsToCheck = [
-        state.voiceChat.currentAiText || '',
-        ...(state.voiceChat.recentAiTexts || [])
-    ];
+    // Collect all AI texts: current buffer, recent cache, and all rendered AI bubbles in DOM
+    const textsToCheck = new Set();
+    if (state.voiceChat.currentAiText) textsToCheck.add(state.voiceChat.currentAiText);
+    if (state.voiceChat.recentAiTexts && Array.isArray(state.voiceChat.recentAiTexts)) {
+        for (const t of state.voiceChat.recentAiTexts) {
+            if (t) textsToCheck.add(t);
+        }
+    }
+    if (elements.voiceDialogueBox) {
+        const aiBubbles = elements.voiceDialogueBox.querySelectorAll('.dialogue-bubble.ai .bubble-content');
+        aiBubbles.forEach((el) => {
+            const txt = el.textContent;
+            if (txt) textsToCheck.add(txt);
+        });
+    }
+
+    const candWords = candNorm.split(' ').filter(w => w.length > 1);
 
     for (const aiText of textsToCheck) {
         const aiNorm = normalize(aiText);
         if (!aiNorm) continue;
 
-        // Direct containment
+        // Direct containment: if AI speech contains candidate phrase or vice-versa
         if (aiNorm.includes(candNorm) || (candNorm.length > 8 && candNorm.includes(aiNorm))) {
             return true;
         }
 
-        // Substantial word overlap
-        const candWords = candNorm.split(' ').filter(w => w.length > 2);
+        // Substantial word overlap (40%+ of words match the AI response)
         if (candWords.length >= 2) {
             const aiWords = new Set(aiNorm.split(' '));
             let matchCount = 0;
             for (const w of candWords) {
                 if (aiWords.has(w)) matchCount++;
             }
-            if (matchCount / candWords.length >= 0.6) {
+            if (matchCount / candWords.length >= 0.4) {
                 return true;
             }
         }
@@ -2479,21 +2528,6 @@ function isModelSpeechEcho(text) {
  * Initializes continuous Web Speech API speech recognition for instant live captions of user speech.
  */
 function initVoiceChatSpeechRecognition() {
-    // 1. Mobile & Touch Screen Conflict Prevention:
-    // On Android (Chrome), the operating system locks the hardware microphone exclusively for getUserMedia.
-    // Concurrently initializing the Web Speech API triggers the Android OS system notification:
-    // "Speech recognition (this is from Google) can't record now as Google Chrome is recording."
-    // Because Ustad Live (Gemini 3.8 Live) natively processes raw 16kHz PCM microphone audio directly
-    // over the WebSocket, auxiliary client-side speech recognition is disabled on mobile devices.
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-        (window.matchMedia && window.matchMedia('(max-width: 800px)').matches && 'ontouchstart' in window);
-
-    if (isMobile) {
-        logMessage('Mobile device active: Direct 16kHz PCM audio streaming to Ustad Live is active (auxiliary SpeechRecognition bypassed to prevent Android microphone hardware lock conflicts).');
-        state.voiceChat.speechRecognitionAvailable = false;
-        return;
-    }
-
     const SpeechRecog = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecog) {
         logMessage('Speech recognition not available for client-side live captions.');
@@ -2519,7 +2553,7 @@ function initVoiceChatSpeechRecognition() {
                 state.voiceChat.isSpeechRecognitionSuppressed;
             const isThinking = state.voiceChat.botState === 'thinking';
             const inEchoTail = (now < state.voiceChat.suppressUserTranscriptionUntil) ||
-                (now - state.voiceChat.lastAiSpeechEndTime < 650);
+                (now - state.voiceChat.lastAiSpeechEndTime < 1000);
 
             // Suppress transcription when model is speaking, thinking, or in echo tail
             if (isAiSpeaking || isThinking || inEchoTail) {
@@ -2541,6 +2575,7 @@ function initVoiceChatSpeechRecognition() {
             // Echo filter: verify the text does NOT match words spoken by the model
             if (isModelSpeechEcho(final) || isModelSpeechEcho(interim)) {
                 logMessage('Echo filter dropped model voice output from user transcription.');
+                state.voiceChat.lastInterimText = '';
                 return;
             }
 
@@ -2549,7 +2584,7 @@ function initVoiceChatSpeechRecognition() {
                     (state.voiceChat.currentTurnUserText ? state.voiceChat.currentTurnUserText + ' ' : '') + final.trim()
                 ).trim();
                 state.voiceChat.lastInterimText = '';
-                appendUserDialogue(state.voiceChat.currentTurnUserText, true);
+                appendUserDialogue(state.voiceChat.currentTurnUserText, false);
             } else if (interim) {
                 state.voiceChat.lastInterimText = interim.trim();
                 const display = (
@@ -2563,7 +2598,7 @@ function initVoiceChatSpeechRecognition() {
             if (e.error === 'audio-capture' || e.error === 'not-allowed') {
                 logMessage(`Speech recognition hardware conflict (${e.error}). Disabling auxiliary speech recognition.`);
                 state.voiceChat.speechRecognitionAvailable = false;
-                try { recognition.abort(); } catch (_) {}
+                try { recognition.abort(); } catch (_) { }
                 state.voiceChat.speechRecognition = null;
                 return;
             }
@@ -2575,7 +2610,10 @@ function initVoiceChatSpeechRecognition() {
         recognition.onend = () => {
             if (!state.voiceChat.speechRecognitionAvailable) return;
             if (state.voiceChat.isActive && !state.voiceChat.isMuted && !state.voiceChat.isSpeechRecognitionSuppressed) {
-                try { recognition.start(); } catch (_) {}
+                try { recognition.start(); } catch (_) { }
+            } else if (!state.voiceChat.isActive) {
+                // Clean up if voice chat is no longer active
+                state.voiceChat.speechRecognition = null;
             }
         };
 
@@ -2624,6 +2662,9 @@ function processVoiceChatAudioChunk(base64Data) {
 
     // Suppress speech recognition while AI audio is playing to prevent speaker loopback
     state.voiceChat.isSpeechRecognitionSuppressed = true;
+    try {
+        state.voiceChat.speechRecognition?.abort();
+    } catch (_) { }
 
     // If we were waiting in thinking state, transition to AI speaking and clear watchdog
     if (state.voiceChat.botState === 'thinking') {
@@ -2642,13 +2683,13 @@ function processVoiceChatAudioChunk(base64Data) {
             if (state.voiceChat.isActive && state.voiceChat.botState === 'ai-speaking') {
                 const nowPerf = performance.now();
                 state.voiceChat.lastAiSpeechEndTime = nowPerf;
-                // Add a 650ms acoustic echo settling window
-                state.voiceChat.suppressUserTranscriptionUntil = nowPerf + 650;
+                // Add a 1000ms acoustic echo settling window
+                state.voiceChat.suppressUserTranscriptionUntil = nowPerf + 1000;
 
-                // Cache recent AI text for echo filtering
+                // Cache recent AI text for echo filtering before clearing
                 if (state.voiceChat.currentAiText) {
                     state.voiceChat.recentAiTexts.push(state.voiceChat.currentAiText);
-                    if (state.voiceChat.recentAiTexts.length > 6) {
+                    if (state.voiceChat.recentAiTexts.length > 10) {
                         state.voiceChat.recentAiTexts.shift();
                     }
                 }
@@ -2660,19 +2701,26 @@ function processVoiceChatAudioChunk(base64Data) {
                 state.voiceChat.hasSpokenInTurn = false;
                 state.voiceChat.consecutiveSpeechFrames = 0;
                 state.voiceChat.consecutiveSilenceFrames = 0;
+                // Reset AI text buffer for next turn
+                state.voiceChat.currentAiText = '';
+                // Reset turn completion flag
+                state.turnComplete = false;
 
                 setVoiceBotState('listening');
                 state.voiceChat.currentAiBubble = null;
 
-                // Resume speech recognition listening after echo has decayed
+                // Resume speech recognition listening after echo has fully decayed
                 setTimeout(() => {
                     if (state.voiceChat.isActive && state.voiceChat.botState === 'listening') {
                         state.voiceChat.isSpeechRecognitionSuppressed = false;
-                        try {
-                            state.voiceChat.speechRecognition?.start();
-                        } catch (_) {}
+                        // Ensure speech recognition is properly restarted
+                        if (state.voiceChat.speechRecognitionAvailable && state.voiceChat.speechRecognition) {
+                            try {
+                                state.voiceChat.speechRecognition.start();
+                            } catch (_) { }
+                        }
                     }
-                }, 500);
+                }, 1000);
             }
         }
     };
@@ -2692,17 +2740,21 @@ function interruptAiSpeech(reason = 'Interrupted') {
     state.voiceChat.suppressUserTranscriptionUntil = now + 400;
 
     if (state.currentCaptionAbortController) {
-        try { state.currentCaptionAbortController.abort(); } catch (_) {}
+        try { state.currentCaptionAbortController.abort(); } catch (_) { }
         state.currentCaptionAbortController = null;
     }
     if (state.voiceChat.thinkingWatchdog) {
         clearTimeout(state.voiceChat.thinkingWatchdog);
         state.voiceChat.thinkingWatchdog = null;
     }
+    if (state.voiceChat.responseWatchdog) {
+        clearTimeout(state.voiceChat.responseWatchdog);
+        state.voiceChat.responseWatchdog = null;
+    }
 
     state.voiceChat.activeAiAudioNodes.forEach((node) => {
-        try { node.stop(); } catch (_) {}
-        try { node.disconnect(); } catch (_) {}
+        try { node.stop(); } catch (_) { }
+        try { node.disconnect(); } catch (_) { }
     });
     state.voiceChat.activeAiAudioNodes = [];
 
@@ -2723,6 +2775,10 @@ function interruptAiSpeech(reason = 'Interrupted') {
     state.voiceChat.hasSpokenInTurn = false;
     state.voiceChat.consecutiveSpeechFrames = 0;
     state.voiceChat.consecutiveSilenceFrames = 0;
+    // Reset AI text buffer for next turn
+    state.voiceChat.currentAiText = '';
+    // Reset turn completion flag
+    state.turnComplete = false;
 
     if (state.voiceChat.currentAiBubble) {
         const content = state.voiceChat.currentAiBubble.querySelector('.bubble-content');
@@ -2744,7 +2800,7 @@ function interruptAiSpeech(reason = 'Interrupted') {
             setVoiceBotState('listening');
             try {
                 state.voiceChat.speechRecognition?.start();
-            } catch (_) {}
+            } catch (_) { }
         }
     }, 350);
 }
@@ -2786,6 +2842,9 @@ function appendUserDialogue(text, isFinal = false) {
  */
 function appendAiDialogue(text) {
     if (!text) return;
+
+    // Ensure user bubble is detached so user speech and assistant speech never mix
+    state.voiceChat.currentUserBubble = null;
 
     if (elements.dialoguePlaceholder && elements.dialoguePlaceholder.style.display !== 'none') {
         elements.dialoguePlaceholder.style.display = 'none';
@@ -2874,11 +2933,11 @@ function appendLiveQueryAiDialogue(text) {
  */
 async function fetchAndStreamAiCaptions(query, targetMode = 'voiceChat') {
     const apiKey = elements.apiKey.value.trim();
-    if (!apiKey || !query) return;
+    if (!apiKey || !query || !query.trim() || query.trim() === 'Voice conversation response') return;
 
     // Abort previous caption fetch if still active
     if (state.currentCaptionAbortController) {
-        try { state.currentCaptionAbortController.abort(); } catch (_) {}
+        try { state.currentCaptionAbortController.abort(); } catch (_) { }
     }
     const abortController = new AbortController();
     state.currentCaptionAbortController = abortController;
@@ -2939,7 +2998,7 @@ async function fetchAndStreamAiCaptions(query, targetMode = 'voiceChat') {
                             }
                             appendTranscript(chunkText);
                         }
-                    } catch (_) {}
+                    } catch (_) { }
                 }
             }
         }
@@ -3003,6 +3062,24 @@ async function startVoiceChat() {
  */
 async function onVoiceChatConnected() {
     state.voiceChat.isActive = true;
+    // Reset conversation state for fresh start
+    state.turnComplete = false;
+    state.voiceChat.currentAiText = '';
+    state.voiceChat.currentTurnUserText = '';
+    state.voiceChat.lastInterimText = '';
+    state.voiceChat.hasSpokenInTurn = false;
+    state.voiceChat.consecutiveSpeechFrames = 0;
+    state.voiceChat.consecutiveSilenceFrames = 0;
+    state.voiceChat.currentUserBubble = null;
+    state.voiceChat.currentAiBubble = null;
+    state.voiceChat.aiAudioScheduledEndTime = 0;
+    state.voiceChat.activeAiAudioNodes = [];
+    state.voiceChat.recentAiTexts = [];
+    state.voiceChat.lastAiSpeechEndTime = 0;
+    state.voiceChat.suppressUserTranscriptionUntil = 0;
+    // CRITICAL: Reset suppressUserTranscriptionUntil to 0 so microphone is immediately available for next query
+    state.voiceChat.isSpeechRecognitionSuppressed = false;
+
     elements.startVoiceChatBtnText.textContent = 'End Conversation';
     elements.startVoiceChatBtn.classList.add('in-call');
     elements.startVoiceChatBtn.querySelector('.btn-icon').textContent = '📞';
@@ -3035,8 +3112,12 @@ function endVoiceChat() {
         clearTimeout(state.voiceChat.thinkingWatchdog);
         state.voiceChat.thinkingWatchdog = null;
     }
+    if (state.voiceChat.responseWatchdog) {
+        clearTimeout(state.voiceChat.responseWatchdog);
+        state.voiceChat.responseWatchdog = null;
+    }
     if (state.currentCaptionAbortController) {
-        try { state.currentCaptionAbortController.abort(); } catch (_) {}
+        try { state.currentCaptionAbortController.abort(); } catch (_) { }
         state.currentCaptionAbortController = null;
     }
 
@@ -3046,16 +3127,16 @@ function endVoiceChat() {
     }
 
     if (state.voiceChat.micProcessor) {
-        try { state.voiceChat.micProcessor.disconnect(); } catch (_) {}
+        try { state.voiceChat.micProcessor.disconnect(); } catch (_) { }
         state.voiceChat.micProcessor = null;
     }
     if (state.voiceChat.micSource) {
-        try { state.voiceChat.micSource.disconnect(); } catch (_) {}
+        try { state.voiceChat.micSource.disconnect(); } catch (_) { }
         state.voiceChat.micSource = null;
     }
 
     if (state.voiceChat.speechRecognition) {
-        try { state.voiceChat.speechRecognition.stop(); } catch (_) {}
+        try { state.voiceChat.speechRecognition.stop(); } catch (_) { }
         state.voiceChat.speechRecognition = null;
     }
 
